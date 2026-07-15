@@ -24,6 +24,7 @@ def render_messages(
     topic: str,
     roster_names: list[str],
     transcript: list[dict[str, Any]],
+    memories: list[str] | None = None,
 ) -> list[dict[str, str]]:
     others = [n for n in roster_names if n != persona.name]
 
@@ -44,6 +45,11 @@ def render_messages(
         "casual register, no headings, no lists, no roleplay asterisks.\n"
         f"- Your voice: {persona.voice or 'natural, unforced'}."
     )
+
+    if memories:
+        system += "\nThings you remember about the people here:\n" + "\n".join(
+            f"- {m}" for m in memories
+        )
 
     tail = transcript[-MAX_LOG_MESSAGES:]
     if tail:

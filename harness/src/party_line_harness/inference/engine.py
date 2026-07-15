@@ -30,6 +30,7 @@ class Engine(Protocol):
         roster_names: list[str],
         transcript: list[dict[str, Any]],
         cancel: asyncio.Event,
+        memories: list[str] | None = None,
     ) -> str | None:
         """One chat message in the persona's voice, or None if cancelled."""
         ...
@@ -73,8 +74,9 @@ class MlxEngine:
         roster_names: list[str],
         transcript: list[dict[str, Any]],
         cancel: asyncio.Event,
+        memories: list[str] | None = None,
     ) -> str | None:
-        messages = tr.render_messages(persona, topic, roster_names, transcript)
+        messages = tr.render_messages(persona, topic, roster_names, transcript, memories)
         stops = tr.stop_strings(roster_names)
 
         async with self._lock:

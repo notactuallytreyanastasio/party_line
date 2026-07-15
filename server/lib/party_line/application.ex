@@ -10,7 +10,10 @@ defmodule PartyLine.Application do
     children = [
       PartyLineWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:party_line, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: PartyLine.PubSub}
+      {Phoenix.PubSub, name: PartyLine.PubSub},
+      # Root chat tree ingestion. Always started; no-ops when :memory is
+      # disabled, and degrades gracefully when the deciduous daemon is down.
+      PartyLine.Memory.Ingest
     ] ++
       PartyLine.Rooms.child_specs() ++
       [

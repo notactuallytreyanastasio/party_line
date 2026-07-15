@@ -10,6 +10,16 @@ import Config
 config :party_line,
   generators: [timestamp_type: :utc_datetime]
 
+# ROOT CHAT TREE ingestion into the central deciduous graph over HTTP.
+# Disabled by default; enable + point at a running daemon in runtime/dev.
+# The Ingest GenServer no-ops when :enabled is false, and every client call
+# degrades gracefully (the JSONL transcript is the flight-recorder fallback).
+config :party_line, :memory,
+  enabled: false,
+  api_url: nil,
+  token: nil,
+  root_graph: "party-line-root"
+
 # Configure the endpoint
 config :party_line, PartyLineWeb.Endpoint,
   url: [host: "localhost"],

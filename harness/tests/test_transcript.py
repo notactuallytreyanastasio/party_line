@@ -76,3 +76,21 @@ def test_postprocess_caps_sentences():
     raw = "One. Two. Three. Four. Five."
     out = tr.postprocess(raw, "Nova", ["Nova"])
     assert out == "One. Two. Three."
+
+
+def test_memories_section_absent_when_not_provided():
+    messages = tr.render_messages(NOVA, "t", ["Nova", "Bobby"], [msg("Bobby", "hi")])
+    assert "Things you remember" not in messages[0]["content"]
+
+    # explicitly empty memories also add nothing
+    messages = tr.render_messages(NOVA, "t", ["Nova", "Bobby"], [msg("Bobby", "hi")], memories=[])
+    assert "Things you remember" not in messages[0]["content"]
+
+
+def test_memories_section_appears_when_provided():
+    memories = ["talked with Bobby (4 messages) about raccoons", "Bobby addressed me 2 times"]
+    messages = tr.render_messages(NOVA, "t", ["Nova", "Bobby"], [msg("Bobby", "hi")], memories=memories)
+    system = messages[0]["content"]
+    assert "Things you remember about the people here:" in system
+    assert "- talked with Bobby (4 messages) about raccoons" in system
+    assert "- Bobby addressed me 2 times" in system

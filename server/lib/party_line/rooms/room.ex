@@ -442,6 +442,7 @@ defmodule PartyLine.Rooms.Room do
 
     broadcast(state, message)
     PartyLine.TranscriptLog.append(state.id, message)
+    PartyLine.Memory.Ingest.record_message(state.id, message)
 
     %{
       state
@@ -490,6 +491,12 @@ defmodule PartyLine.Rooms.Room do
   # ── Plumbing ────────────────────────────────────────────────────────────
 
   defp broadcast_presence(state, p, event, opts \\ []) do
+    PartyLine.Memory.Ingest.record_presence(state.id, event, %{
+      participant_id: p.id,
+      name: p.name,
+      kind: p.kind
+    })
+
     broadcast(
       state,
       %{

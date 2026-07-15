@@ -48,7 +48,9 @@ class FakeEngine:
         roster_names: list[str],
         transcript: list[dict[str, Any]],
         cancel: asyncio.Event,
+        memories: list[str] | None = None,
     ) -> str | None:
+        _ = memories  # FakeEngine has no prompt to fold memories into
         delay = self.rng.uniform(self.min_delay, self.max_delay)
         try:
             await asyncio.wait_for(cancel.wait(), timeout=delay)

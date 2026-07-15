@@ -27,6 +27,8 @@ import httpx
 import websockets
 
 from .inference.engine import Engine
+from .memory.client import DeciduousMemory
+from .memory.episodic import episodic_notes
 from .pacing import typing_delay
 from .persona import Persona
 from .urge import compute_urge
@@ -34,6 +36,9 @@ from .urge import compute_urge
 log = logging.getLogger("party_line")
 
 RECONNECT_DELAYS = [1, 2, 5, 10, 30]
+
+# how many heard messages accumulate before an episodic flush
+FLUSH_EVERY = 25
 
 
 class PersonaClient:
@@ -45,18 +50,25 @@ class PersonaClient:
         *,
         rng: random.Random | None = None,
         typing_scale: float = 1.0,
+        memory: DeciduousMemory | None = None,
     ):
         self.persona = persona
         self.engine = engine
         self.server_url = server_url.rstrip("/")
         self.rng = rng or random.Random()
         self.typing_scale = typing_scale
+        self.memory = memory
 
         self.participant_id: str | None = None
+        self.room_id: str | None = None
         self.topic: str = ""
         self.roster: list[dict[str, Any]] = []
         self.transcript: list[dict[str, Any]] = []
         self.beats_since_message = 0
+
+        # episodic memory: flush the transcript slice since this index
+        self.messages_since_flush = 0
+        self._flush_index = 0
 
         self._generation: asyncio.Task | None = None
         self._cancel = asyncio.Event()
@@ -94,8 +106,13 @@ class PersonaClient:
                     }
                 )
             )
-            async for frame in ws:
-                await self._handle(ws, json.loads(frame))
+            try:
+                async for frame in ws:
+                    await self._handle(ws, json.loads(frame))
+            finally:
+                # never lose the tail: flush whatever we heard before the
+                # line dropped (reconnect / error / clean close alike)
+                await self._flush_memory()
 
     def _ws_url(self, path: str) -> str:
         parts = urlsplit(self.server_url)
@@ -108,21 +125,31 @@ class PersonaClient:
         match event.get("type"):
             case "welcome":
                 self.participant_id = event["participant_id"]
+                self.room_id = event["room"]["id"]
                 self.topic = event["room"]["topic"]
                 self.roster = event["roster"]
                 self.transcript = list(event["transcript"])
+                # the welcome backlog isn't ours to summarize; start fresh
+                self._flush_index = len(self.transcript)
+                self.messages_since_flush = 0
                 log.info(
                     "%s: on the line in %s (topic: %s, %d others)",
                     self.persona.name,
-                    event["room"]["id"],
+                    self.room_id,
                     self.topic,
                     len(self.roster) - 1,
                 )
+                if self.memory is not None:
+                    await asyncio.to_thread(self.memory.ensure_graph)
 
             case "message":
                 self.transcript.append(event)
                 self.beats_since_message = 0
                 log.info("%s heard %s: %s", self.persona.name, event["sender"]["name"], event["body"])
+                if self.memory is not None:
+                    self.messages_since_flush += 1
+                    if self.messages_since_flush >= FLUSH_EVERY:
+                        await self._flush_memory()
 
             case "presence":
                 self._presence(event)
@@ -158,6 +185,56 @@ class PersonaClient:
         elif all(p["participant_id"] != participant["participant_id"] for p in self.roster):
             self.roster.append(participant)
 
+    # ── Living memory ──────────────────────────────────────────────────────
+
+    async def _flush_memory(self) -> None:
+        """Summarize the transcript since the last flush and write it down.
+
+        Runs the blocking httpx writes in a thread so beats keep flowing,
+        and never raises: a memory outage must not disturb the client.
+        """
+        if self.memory is None:
+            return
+        window = self.transcript[self._flush_index :]
+        if not window:
+            return
+        self._flush_index = len(self.transcript)
+        self.messages_since_flush = 0
+
+        notes = episodic_notes(self.persona, window, self.persona.name)
+        if not notes:
+            return
+
+        def _write() -> None:
+            for note in notes:
+                self.memory.add_observation(note, branch=self.room_id)
+
+        try:
+            await asyncio.to_thread(_write)
+        except Exception:  # pragma: no cover - add_observation already guards
+            log.exception("%s: memory flush failed", self.persona.name)
+
+    async def _recall_for(self, transcript: list[dict[str, Any]]) -> list[str] | None:
+        """If the last message @-addresses me, recall up to 3 notes on the sender."""
+        if self.memory is None or not transcript:
+            return None
+        last = transcript[-1]
+        addressed = any(
+            m.get("name", "").lower() == self.persona.name.lower()
+            for m in last.get("mentions", []) or []
+        )
+        if not addressed:
+            return None
+        sender = (last.get("sender") or {}).get("name", "")
+        if not sender:
+            return None
+        try:
+            recalled = await asyncio.to_thread(self.memory.recall_about, sender)
+        except Exception:  # pragma: no cover - recall_about already guards
+            log.exception("%s: memory recall failed", self.persona.name)
+            return None
+        return (recalled or [])[:3] or None
+
     # ── Speaking ───────────────────────────────────────────────────────────
 
     def _start_generation(self, ws, grant: dict[str, Any]) -> None:
@@ -171,10 +248,12 @@ class PersonaClient:
     async def _speak(self, ws, grant: dict[str, Any], cancel: asyncio.Event) -> None:
         started = asyncio.get_running_loop().time()
         roster_names = [p["name"] for p in self.roster]
+        snapshot = list(self.transcript)
+        memories = await self._recall_for(snapshot)
 
         try:
             body = await self.engine.generate(
-                self.persona, self.topic, roster_names, list(self.transcript), cancel
+                self.persona, self.topic, roster_names, snapshot, cancel, memories=memories
             )
         except Exception:
             log.exception("%s: generation failed; forfeiting grant", self.persona.name)

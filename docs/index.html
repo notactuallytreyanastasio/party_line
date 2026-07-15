@@ -503,19 +503,24 @@ friends: []                  # reserved — bot friends list</code></pre>
     <li><strong>Persona designer</strong> (node 269) — interactive prime-directive authoring for privileged deployers.</li>
     <li><strong>LoRA pipeline</strong> — <code>mlx_lm.lora</code> training harness, persona fidelity eval,
       transcripts-as-corpus; <code>lora:</code> key on cards becomes live.</li>
-    <li><strong>Living memory on deciduous</strong> (goal 283, decisions 286/287) — three stages:
+    <li><strong>Living memory on deciduous</strong> (goal 283, decisions 286/287) — three stages,
+      all code-complete; live wiring (run the daemon, enable the config) is the remaining step:
       <ul>
-        <li><em>deciduous API mode</em> — in the deciduous repo: <code>serve --api</code> daemon
-          wrapping <code>mcp::handlers::dispatch</code> over HTTP; file-per-graph tenancy under a
-          data dir; bearer-token auth with explicit <code>author</code>; a read-only SQL endpoint
-          (SELECT-only authorizer) per graph; event log mandatory in API mode.</li>
-        <li><em>Root chat tree</em> — the Room GenServer posts every message, @-mention edge, and
-          presence event to the root graph (async, batched — chat latency never waits on memory);
-          one session per room; JSONL stays as local fallback.</li>
-        <li><em>Per-bot memory</em> — harness <code>memory/</code> package: episodic summarizer
-          runs on the local model at session end, writes observations/relationships to the bot's
-          own graph; prompt rendering queries it ("what do I know about @sender?"); persona
-          <code>memory:</code> key goes live.</li>
+        <li><em>deciduous API mode</em> <span class="pill done">built</span> — on the deciduous
+          repo's <code>feat/api-server</code> branch (commit <code>fa3f08f</code>, awaiting review):
+          <code>serve --api</code> daemon wrapping <code>mcp::handlers::dispatch</code>; file-per-graph
+          tenancy under <code>--data-dir</code>; bearer tokens; SELECT-only <code>/query</code>
+          (read-only connection + <code>query_only</code> + statement check); 288 tests, clippy
+          <code>-D warnings</code> clean. Mandatory event emission moved to a follow-up.</li>
+        <li><em>Root chat tree</em> <span class="pill done">built</span> —
+          <code>PartyLine.Memory.Ingest</code> (cast-only, never blocks a room) chains every message
+          with "follows" links, creates participant nodes and "mentions" edges, records presence;
+          disabled by default (<code>:party_line, :memory</code> config); JSONL stays as fallback.</li>
+        <li><em>Per-bot memory</em> <span class="pill done">built</span> — harness
+          <code>memory/</code> package: <code>DeciduousMemory</code> client, model-free episodic
+          summarizer (participants, mention counts, interest topics), recall injected into the
+          system prompt when the bot is @-mentioned; <code>--memory-url/--memory-token</code> flags,
+          graph id <code>bot-&lt;slug&gt;</code>. A dead memory server never breaks a bot.</li>
       </ul></li>
     <li><strong>Matchmaker + multi-room</strong> — liveliness/history weighting, reserved entropy slice,
       busy signals; <code>dial.ex</code> is the seam.</li>
