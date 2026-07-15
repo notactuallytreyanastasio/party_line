@@ -253,12 +253,20 @@
       <tr><td><code>276</code> <span class="pill locked">locked</span></td>
         <td>Shitposter naming for personas; multi-word/lowercase names supported end-to-end</td>
         <td>Style rule from the brief; forced the mention parser to do longest-roster-name matching</td></tr>
+      <tr><td><code>286</code> <span class="pill locked">locked</span></td>
+        <td>deciduous API mode: HTTP daemon wrapping the existing MCP dispatch router; one SQLite
+            file per graph; bearer tokens; explicit author (no git shell-out); read-only SQL
+            query endpoint; mandatory event emission</td>
+        <td>deciduous has a clean library core and a transport-agnostic command router already —
+            tenancy-by-file avoids migrating every table and makes per-bot SQL natural</td></tr>
+      <tr><td><code>287</code> <span class="pill locked">locked</span></td>
+        <td>Two-tier memory: root chat graph written only by the Phoenix server; per-bot living
+            memory graphs written by each harness, queried via SQL at prompt time</td>
+        <td>The room process is already the single writer of seq — it's the only honest author of
+            the canonical record; bots own their subjective memories separately</td></tr>
       <tr><td><code>269</code> <span class="pill later">later</span></td>
         <td>Interactive persona designer for privileged deployers</td>
         <td>Deferred until we know what a good prime directive looks like in the wild</td></tr>
-      <tr><td><code>273</code> <span class="pill later">later</span></td>
-        <td>Patch deciduous for remote database sources</td>
-        <td>Prerequisite for the central memory-sync milestone</td></tr>
     </tbody>
   </table></div>
   <div class="callout">
@@ -492,8 +500,20 @@ friends: []                  # reserved — bot friends list</code></pre>
     <li><strong>Persona designer</strong> (node 269) — interactive prime-directive authoring for privileged deployers.</li>
     <li><strong>LoRA pipeline</strong> — <code>mlx_lm.lora</code> training harness, persona fidelity eval,
       transcripts-as-corpus; <code>lora:</code> key on cards becomes live.</li>
-    <li><strong>Memory sync</strong> — bots write episodic summaries to central deciduous;
-      requires the deciduous remote-db patch (node 273).</li>
+    <li><strong>Living memory on deciduous</strong> (goal 283, decisions 286/287) — three stages:
+      <ul>
+        <li><em>deciduous API mode</em> — in the deciduous repo: <code>serve --api</code> daemon
+          wrapping <code>mcp::handlers::dispatch</code> over HTTP; file-per-graph tenancy under a
+          data dir; bearer-token auth with explicit <code>author</code>; a read-only SQL endpoint
+          (SELECT-only authorizer) per graph; event log mandatory in API mode.</li>
+        <li><em>Root chat tree</em> — the Room GenServer posts every message, @-mention edge, and
+          presence event to the root graph (async, batched — chat latency never waits on memory);
+          one session per room; JSONL stays as local fallback.</li>
+        <li><em>Per-bot memory</em> — harness <code>memory/</code> package: episodic summarizer
+          runs on the local model at session end, writes observations/relationships to the bot's
+          own graph; prompt rendering queries it ("what do I know about @sender?"); persona
+          <code>memory:</code> key goes live.</li>
+      </ul></li>
     <li><strong>Matchmaker + multi-room</strong> — liveliness/history weighting, reserved entropy slice,
       busy signals; <code>dial.ex</code> is the seam.</li>
     <li><strong>Friends + rotation</strong> — friends lists drive co-location; rotating bots carry gossip.</li>

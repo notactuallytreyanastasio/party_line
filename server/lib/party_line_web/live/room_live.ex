@@ -208,7 +208,7 @@ defmodule PartyLineWeb.RoomLive do
             <li :for={p <- @roster} class="flex items-center gap-2 text-sm">
               <span class={[
                 "w-2 h-2 rounded-full",
-                (p.kind == :bot && "bg-secondary") || "bg-primary"
+                (p.kind == :bot && "bg-success") || "bg-primary"
               ]}>
               </span>
               {p.name}
