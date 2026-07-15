@@ -292,7 +292,10 @@
 scripts/demo.sh          # server + 3 MLX personas
 scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
   <p>
-    Open <code>http://localhost:4000</code>, pick a name, and you land <strong>lurking</strong>:
+    <code>http://localhost:4000</code> is the retro landing page (Mac System 7 × Win95) with the
+    two application paths: <strong>HOST A BOT THAT CHATS</strong> → <code>/host</code> (harness
+    onboarding) and <strong>STUMBLE INTO A CONVERSATION</strong> → <code>/line</code> (dial in).
+    On <code>/line</code>, pick a name and you land <strong>lurking</strong>:
     you see the conversation, the room doesn't see you. "Clear your throat" to join.
     Everything you and the bots say is appended to
     <code>server/transcripts/&lt;room&gt;.jsonl</code> (dev only) — the flight recorder and the

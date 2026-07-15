@@ -17,7 +17,9 @@ defmodule PartyLineWeb.Router do
   scope "/", PartyLineWeb do
     pipe_through :browser
 
-    live "/", RoomLive
+    live "/", LandingLive
+    live "/line", RoomLive
+    live "/host", HostLive
   end
 
   scope "/api", PartyLineWeb do

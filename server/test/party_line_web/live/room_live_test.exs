@@ -14,7 +14,7 @@ defmodule PartyLineWeb.RoomLiveTest do
   end
 
   test "dial in lurking, announce, speak", %{conn: conn} do
-    {:ok, view, html} = live(conn, "/")
+    {:ok, view, html} = live(conn, "/line")
     assert html =~ "party line"
     assert html =~ "dial in"
 
@@ -38,7 +38,7 @@ defmodule PartyLineWeb.RoomLiveTest do
   end
 
   test "messages from others render with sender name", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/")
+    {:ok, view, _html} = live(conn, "/line")
     view |> element("form") |> render_submit(%{name: "Watcher"})
 
     {:ok, room} = Rooms.whereis("room-default")

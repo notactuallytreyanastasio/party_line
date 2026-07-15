@@ -103,3 +103,196 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+/* retro landing chrome */
+.retro-desktop {
+  min-height: 100vh;
+  width: 100%;
+  background: #008080;
+  color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  font-family: "Chicago", "Charcoal", "Geneva", "MS Sans Serif", "Tahoma", "Verdana", sans-serif;
+}
+
+.retro-window {
+  width: 100%;
+  max-width: 860px;
+  background: #c0c0c0;
+  border: 1px solid #000;
+  box-shadow:
+    inset 1px 1px 0 #ffffff,
+    inset -1px -1px 0 #000000,
+    inset -2px -2px 0 #404040,
+    4px 4px 0 rgba(0, 0, 0, 0.45);
+}
+
+.retro-titlebar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  background: repeating-linear-gradient(
+    to bottom,
+    #000 0,
+    #000 1px,
+    #fff 1px,
+    #fff 3px
+  );
+  border-bottom: 1px solid #000;
+}
+
+.retro-titlebar-title {
+  background: #fff;
+  padding: 0 10px;
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.retro-close {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border: 1px solid #000;
+  display: block;
+}
+
+.retro-body {
+  background: #fff;
+  border-top: 1px solid #000;
+  padding: 24px;
+}
+
+.retro-body p {
+  margin: 0 0 12px;
+  line-height: 1.5;
+}
+
+.retro-body p:last-child {
+  margin-bottom: 0;
+}
+
+.retro-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 4px 16px;
+  background: #c0c0c0;
+  color: #000;
+  border: 1px solid #000;
+  box-shadow:
+    inset 1px 1px 0 #ffffff,
+    inset -1px -1px 0 #000000,
+    inset -2px -2px 0 #404040;
+  cursor: pointer;
+  font: inherit;
+}
+
+.retro-btn:hover {
+  background: #b0b0b0;
+}
+
+.retro-btn:active {
+  box-shadow:
+    inset -1px -1px 0 #ffffff,
+    inset 1px 1px 0 #000000,
+    inset 2px 2px 0 #404040;
+}
+
+.retro-btn:focus-visible {
+  outline: 1px dotted #000;
+  outline-offset: -4px;
+}
+
+.retro-panel {
+  display: block;
+  padding: 28px;
+  text-align: center;
+  background: #c0c0c0;
+  color: #000;
+  text-decoration: none;
+  border: 1px solid #000;
+  box-shadow:
+    inset 1px 1px 0 #ffffff,
+    inset -1px -1px 0 #000000,
+    inset -2px -2px 0 #404040;
+  cursor: pointer;
+}
+
+.retro-panel:hover {
+  background: #b0b0b0;
+  box-shadow:
+    inset -1px -1px 0 #ffffff,
+    inset 1px 1px 0 #000000,
+    inset 2px 2px 0 #404040;
+}
+
+.retro-panel-title {
+  font-size: 1.15rem;
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.retro-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  padding: 0 8px;
+  background: #c0c0c0;
+  font-size: 0.75rem;
+  box-shadow:
+    inset -1px -1px 0 #ffffff,
+    inset 1px 1px 0 #808080;
+}
+
+.retro-terminal {
+  background: #000;
+  color: #33ff33;
+  font-family: "Courier New", monospace;
+  padding: 12px;
+  overflow-x: auto;
+  border: 1px solid #808080;
+  box-shadow:
+    inset -1px -1px 0 #ffffff,
+    inset 1px 1px 0 #808080;
+}
+
+.retro-kbd {
+  padding: 1px 5px;
+  background: #c0c0c0;
+  font-family: "Courier New", monospace;
+  font-size: 0.85em;
+  box-shadow:
+    inset -1px -1px 0 #ffffff,
+    inset 1px 1px 0 #808080;
+}
+
+.retro-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+@media (max-width: 640px) {
+  .retro-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .retro-panel,
+  .retro-btn {
+    transition: none;
+  }
+}
