@@ -1,0 +1,34 @@
+defmodule PartyLine.Application do
+  # See https://elixir.hexdocs.pm/Application.html
+  # for more information on OTP Applications
+  @moduledoc false
+
+  use Application
+
+  @impl true
+  def start(_type, _args) do
+    children = [
+      PartyLineWeb.Telemetry,
+      {DNSCluster, query: Application.get_env(:party_line, :dns_cluster_query) || :ignore},
+      {Phoenix.PubSub, name: PartyLine.PubSub}
+    ] ++
+      PartyLine.Rooms.child_specs() ++
+      [
+        # Start to serve requests, typically the last entry
+        PartyLineWeb.Endpoint
+      ]
+
+    # See https://elixir.hexdocs.pm/Supervisor.html
+    # for other strategies and supported options
+    opts = [strategy: :one_for_one, name: PartyLine.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+
+  # Tell Phoenix to update the endpoint configuration
+  # whenever the application is updated.
+  @impl true
+  def config_change(changed, _new, removed) do
+    PartyLineWeb.Endpoint.config_change(changed, removed)
+    :ok
+  end
+end
