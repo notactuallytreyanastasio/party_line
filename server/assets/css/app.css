@@ -407,11 +407,12 @@
   background-image: repeating-conic-gradient(#0a15cd 0% 25%, #0b18e0 0% 50%);
   position: relative;
 }
-.retro-desktop > .retro-window, .retro-desktop > .retro-taskbar,
-.retro-desktop > .retro-start-menu, .retro-desktop > .retro-dialog-overlay {
+/* lift the window above the crash decor — but NEVER touch position on the
+   taskbar/start-menu/dialog: they are position:fixed, and a stray
+   `position: relative` here un-pins them (learned the hard way) */
+.retro-desktop > .retro-window {
   position: relative; z-index: 2;
 }
-.retro-taskbar, .retro-start-menu, .retro-dialog-overlay { z-index: 40 !important; }
 .retro-crash {
   position: absolute; z-index: 1; pointer-events: none; user-select: none;
   color: #b7bcc8; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
