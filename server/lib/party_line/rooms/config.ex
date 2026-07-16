@@ -17,6 +17,10 @@ defmodule PartyLine.Rooms.Config do
             preempt_cooldown: 800,
             silence_backoff: [4_000, 8_000, 15_000, 30_000],
             urge_threshold: 0.2,
+            # floor-holding: a bot may follow itself at this fairness damp,
+            # but a run of max_consecutive hard-zeroes until someone else talks
+            self_follow_penalty: 0.35,
+            max_consecutive: 3,
             max_strikes: 3,
             strike_penalty: 300_000,
             transcript_keep: 200,

@@ -138,10 +138,30 @@ defmodule PartyLineWeb.RoomLiveTest do
     )
 
     html = render(view)
-    assert html =~ "retro-operator-line"
-    assert html =~ "retro-chatline--operator"
+    # the host's latest line is PINNED in the topicbar, not repeated in the log
+    assert html =~ "retro-topicbar"
     assert html =~ "new topic: pierogi"
-    # host voice: no chatname span, so no "Operator:" name-colon prefix
+    refute html =~ "retro-chatline--operator"
     refute html =~ ~r/retro-chatname[^>]*>\s*Operator/
+
+    # a second operator line REPLACES the pinned one
+    send(
+      view.pid,
+      {:party_line,
+       %{
+         type: :message,
+         room_id: "room-default",
+         seq: 1000,
+         message_id: "m-1000",
+         ts: "1996-01-01T00:01:00Z",
+         sender: %{participant_id: "p-op", name: "Operator", kind: :operator},
+         body: "quiet line. try this: opossums.",
+         mentions: []
+       }}
+    )
+
+    html = render(view)
+    assert html =~ "quiet line. try this: opossums."
+    refute html =~ "new topic: pierogi"
   end
 end

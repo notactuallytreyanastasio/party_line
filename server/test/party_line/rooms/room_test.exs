@@ -82,7 +82,30 @@ defmodule PartyLine.Rooms.RoomTest do
     assert beat2 != beat1
   end
 
-  test "a bot cannot follow up its own message" do
+  test "a bot may hold the floor briefly, but a run is capped" do
+    room = start_room()
+    {a, _} = join(room, :a, %{name: "Ada", kind: :bot})
+    {b, _} = join(room, :b, %{name: "Bo", kind: :bot})
+
+    # Ada takes the floor and keeps developing her thought while Bo stays
+    # quiet — continuation is allowed at the dampened fairness
+    for n <- 1..3 do
+      beat = await_beat(:a)
+      Room.bid(room, a, beat, 0.9)
+      assert_receive {:a, %{type: :grant, grant_id: grant}}, 1_000
+      Room.speak(room, a, grant, "my point, part #{n}")
+      assert_receive {:b, %{type: :message}}, 1_000
+    end
+
+    # after max_consecutive in a row, Ada is hard-zeroed until someone else talks
+    beat = await_beat(:a)
+    Room.bid(room, a, beat, 0.95)
+    Room.bid(room, b, beat, 0.3)
+    assert_receive {:b, %{type: :grant}}, 1_000
+    refute_receive {:a, %{type: :grant}}, 20
+  end
+
+  test "an eager rival outbids a floor-holder" do
     room = start_room()
     {a, _} = join(room, :a, %{name: "Ada", kind: :bot})
     {b, _} = join(room, :b, %{name: "Bo", kind: :bot})
@@ -93,11 +116,10 @@ defmodule PartyLine.Rooms.RoomTest do
     Room.speak(room, a, grant, "me first")
     assert_receive {:b, %{type: :message}}, 1_000
 
+    # Ada's 0.9 is dampened to 0.9 × 0.35 ≈ 0.32; Bo's honest 0.4 beats it
     beat2 = await_beat(:a)
-    Room.bid(room, a, beat2, 0.95)
-    Room.bid(room, b, beat2, 0.3)
-
-    # fairness hard-zeroes Ada's bid: Bo wins despite the lower urge
+    Room.bid(room, a, beat2, 0.9)
+    Room.bid(room, b, beat2, 0.4)
     assert_receive {:b, %{type: :grant}}, 1_000
     refute_receive {:a, %{type: :grant}}, 20
   end

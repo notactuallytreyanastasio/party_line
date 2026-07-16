@@ -77,8 +77,10 @@ defmodule PartyLine.Rooms.Operator do
   # ── Priority 1: loop_breaker ─────────────────────────────────────────────
   #
   # The last `loop_window` messages strictly alternate between exactly two
-  # senders. If a third bot is present, pull it in; otherwise the two are the
-  # whole room and we change the subject instead.
+  # senders AND a third bot is present to pull in. In a two-bot room,
+  # alternation is just conversation — summoning nobody and rotating the
+  # topic on every cooldown made the operator cycle the whole deck (the
+  # rapid-rotation bug); genuine repetition is stale_rotation's job.
   defp loop_breaker(view, config) do
     recent = view.recent
     senders = Enum.map(recent, & &1.sender_id)
@@ -88,12 +90,9 @@ defmodule PartyLine.Rooms.Operator do
         length(Enum.uniq(senders)) == 2 and strictly_alternating?(senders)
 
     if two_way? do
-      pair = Enum.uniq(senders)
-
-      case least_recent_bot(view, pair) do
+      case least_recent_bot(view, Enum.uniq(senders)) do
         nil ->
-          # no third bot to summon — the loop *is* the room, so rotate
-          rotate(view)
+          nil
 
         third ->
           {:speak,

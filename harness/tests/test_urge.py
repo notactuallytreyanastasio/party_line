@@ -31,9 +31,13 @@ def test_mention_match_is_case_insensitive():
     assert compute_urge(NOVA, t) == 0.95
 
 
-def test_never_follow_own_message():
+def test_continuation_urge_is_moderate_never_dominant():
+    # a bot that just spoke may want to continue — but never at summons level,
+    # and the server's fairness damp is what keeps runs in check
     t = [msg("Nova", "as I was saying", kind="bot")]
-    assert compute_urge(NOVA, t) == 0.0
+    for seed in range(20):
+        u = compute_urge(NOVA, t, rng=random.Random(seed))
+        assert 0.0 <= u < 0.6
 
 
 def test_message_addressed_to_someone_else_stays_below_threshold():

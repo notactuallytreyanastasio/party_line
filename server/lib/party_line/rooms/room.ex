@@ -362,16 +362,25 @@ defmodule PartyLine.Rooms.Room do
   # Server-side fairness applied on top of the self-reported urge, so a
   # greedy bot cannot monologue: hard zero for following your own message,
   # dampened if you spoke within the last two.
+  # Graduated floor-holding: a bot MAY continue its own thought (dampened),
+  # so one voice can lead a room while others chime in when they actually
+  # have something — but a run is capped so nobody monologues unopposed.
   defp fairness(state, participant_id) do
+    consecutive =
+      state.transcript
+      |> Enum.take_while(&(&1.sender.participant_id == participant_id))
+      |> length()
+
     recent =
       state.transcript
       |> Enum.take(2)
       |> Enum.map(& &1.sender.participant_id)
 
-    case recent do
-      [^participant_id | _] -> 0.0
-      [_, ^participant_id] -> 0.5
-      _ -> 1.0
+    cond do
+      consecutive >= state.config.max_consecutive -> 0.0
+      consecutive >= 1 -> state.config.self_follow_penalty
+      match?([_, ^participant_id], recent) -> 0.5
+      true -> 1.0
     end
   end
 

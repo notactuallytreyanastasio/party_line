@@ -530,3 +530,13 @@
   .retro-multigrid--3 > .retro-window--pane:first-child { grid-row: auto; }
   .retro-window--pane { height: 70vh; }
 }
+
+/* the operator's pinned line: one host voice at the top, never repeated */
+.retro-topicbar {
+  background: #dfdfdf; border: 1px solid #808080; padding: 5px 10px;
+  text-align: center; flex: none;
+  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #a0a0a0;
+}
+.retro-topicbar .retro-operator-line::before, .retro-topicbar .retro-operator-line::after {
+  content: none;
+}

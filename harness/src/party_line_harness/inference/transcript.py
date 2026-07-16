@@ -60,7 +60,16 @@ def render_messages(
             for m in last.get("mentions", [])
         )
 
-        if addressed_to_me:
+        sender_kind = last.get("sender", {}).get("kind", "")
+
+        if addressed_to_me and sender_kind == "operator":
+            # the host called on you: do the thing, don't salute the host
+            instruction = (
+                "The room's Operator just called on you. Do what it asks — "
+                "open the new topic or weigh in — in your own voice, speaking "
+                "to the room. Do NOT address or @-mention the Operator."
+            )
+        elif addressed_to_me:
             # a busy log buries the question — point straight at it
             sender = last["sender"]["name"]
             instruction = (

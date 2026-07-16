@@ -57,6 +57,17 @@ def test_addressed_message_gets_direct_answer_instruction():
     assert "speaking directly to you" not in messages[1]["content"]
 
 
+def test_operator_summons_starts_topic_instead_of_saluting():
+    summons = {
+        "sender": {"name": "Operator", "kind": "operator"},
+        "body": "new topic: pierogi. @Nova, you start.",
+        "mentions": [{"name": "Nova"}],
+    }
+    messages = tr.render_messages(NOVA, "t", ["Nova", "Bobby"], [msg("Bobby", "hi"), summons])
+    assert "Do NOT address or @-mention the Operator" in messages[1]["content"]
+    assert "starting with '@Operator'" not in messages[1]["content"]
+
+
 def test_postprocess_strips_meta_prefix():
     raw = "Here's my next message: Reminds me of the sea otters, actually."
     out = tr.postprocess(raw, "Nova", ["Nova"])

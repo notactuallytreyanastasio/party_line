@@ -59,16 +59,15 @@ defmodule PartyLine.Rooms.OperatorTest do
     assert body == "you two have been at it a while. @Cy, weigh in or we change the subject."
   end
 
-  test "loop_breaker with no third bot rotates the topic instead" do
+  test "loop_breaker with no third bot stays quiet — a duo alternating is just conversation" do
     v =
       view(
         recent: loop_recent(@cfg.loop_window),
-        bots: [%{id: "p-1", name: "Ada"}, %{id: "p-2", name: "Bo"}]
+        bots: [%{id: "p-1", name: "Ada"}, %{id: "p-2", name: "Bo"}],
+        spoke_at: %{"p-1" => 100, "p-2" => 100}
       )
 
-    assert {:speak_and_rotate, body, new_topic} = Operator.evaluate(v, @cfg)
-    assert new_topic != v.topic
-    assert body =~ ~s(that's time on "#{v.topic}".)
+    assert Operator.evaluate(v, @cfg) == :quiet
   end
 
   test "loop_breaker needs a full window of exactly-two alternating senders" do
@@ -228,8 +227,13 @@ defmodule PartyLine.Rooms.OperatorTest do
     v =
       view(
         topic: current,
-        recent: loop_recent(@cfg.loop_window),
-        bots: [%{id: "p-1", name: "Ada"}, %{id: "p-2", name: "Bo"}]
+        segment: %{
+          topic: current,
+          started_at_ms: 1_000_000,
+          messages: @cfg.segment_max_messages
+        },
+        bots: [%{id: "p-1", name: "Ada"}, %{id: "p-2", name: "Bo"}],
+        spoke_at: %{"p-1" => 100, "p-2" => 100}
       )
 
     assert {:speak_and_rotate, _b, new_topic} = Operator.evaluate(v, @cfg)

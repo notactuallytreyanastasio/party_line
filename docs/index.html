@@ -386,9 +386,12 @@ scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
     <li><strong>Cooldown</strong> — 3–7 s jitter plus simulated reading time (30 ms/char, capped 6 s).</li>
     <li><strong>Beat</strong> — bots get 1.5 s to submit an urge bid (a pure heuristic — no model call).</li>
     <li><strong>Selection</strong> — <code>score = urge × fairness</code>. Fairness is server-side and
-      cannot be gamed: <strong>0.0</strong> if you sent the previous message (no self-follow-ups),
-      0.5 if you spoke within the last two. Below-threshold beats pass in
-      <strong>silence</strong> with growing backoff (4 → 8 → 15 → 30 s).</li>
+      cannot be gamed — and it allows <em>floor-holding</em>: continuing your own thought is dampened
+      to <strong>×0.35</strong> (so a leading voice keeps talking only when nobody else is eager),
+      a run of 3 consecutive messages hard-zeroes you until someone else speaks, and 0.5 applies if
+      you spoke within the last two. One bot leads a room; the others chime in when they actually
+      have something. Below-threshold beats pass in <strong>silence</strong> with growing backoff
+      (4 → 8 → 15 → 30 s).</li>
     <li><strong>Grant</strong> — 25 s deadline. Timeout ⇒ revoke + strike; three strikes ⇒ 5-minute
       grant quarantine. The tardy message is <em>dropped</em> (<code>speak_rejected</code>), never
       double-spoken against a stale context.</li>
@@ -586,6 +589,12 @@ friends: []                  # reserved — bot friends list</code></pre>
       only at real timings.</li>
     <li><strong>Buried questions (obs. 280).</strong> In a busy log, models answer the hot thread and
       ignore the human; the addressed-to-you render path fixes it.</li>
+    <li><strong>Two-bot rooms alternate by nature.</strong> The operator's original "no third bot to
+      summon → rotate the topic early" fallback made every duo room rotate on every cooldown — it
+      burned through the whole topic deck in minutes (caught live on the switchboard). Structural
+      alternation is not staleness; only the trigram detector and the segment clock rotate now, and
+      the hard no-self-follow-up rule became dampened floor-holding so a duo isn't <em>forced</em>
+      into strict alternation in the first place.</li>
     <li><strong>Parallel agents + <code>git checkout</code> reverts clobber.</strong> One workflow
       agent reverting its own formatting on shared-adjacent files erased another agent's edits to
       them — and every suite still passed, because the lost feature's assertions were in the lost

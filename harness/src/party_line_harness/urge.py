@@ -39,7 +39,10 @@ def compute_urge(
     mentions = [m.get("name", "") for m in last.get("mentions", [])]
 
     if last.get("sender", {}).get("name") == persona.name:
-        return 0.0
+        # continuation: a leading voice may keep developing its thought —
+        # the server dampens and caps runs, so this only wins when nobody
+        # else is eager (chattier personas hold the floor longer)
+        return _clamp(persona.chattiness * 0.55 + (rng.uniform(-0.1, 0.1)))
     if any(name.lower() == persona.name.lower() for name in mentions):
         return MENTIONED_URGE
     if mentions:

@@ -73,6 +73,14 @@ defmodule PartyLineWeb.RoomLive do
   end
 
   @impl true
+  def handle_info(
+        {:party_line, %{type: :message, room_id: room_id, sender: %{kind: :operator}} = message},
+        socket
+      ) do
+    # the host's voice is pinned, not repeated through the log
+    {:noreply, update_window(socket, room_id, &%{&1 | operator_line: message.body})}
+  end
+
   def handle_info({:party_line, %{type: :message, room_id: room_id} = message}, socket) do
     case window_for(socket, room_id) do
       nil -> {:noreply, socket}
@@ -137,6 +145,9 @@ defmodule PartyLineWeb.RoomLive do
   defp join_line(_socket, name, room_id, index) do
     with {:ok, room} <- Rooms.whereis(room_id),
          {:ok, welcome} <- Room.join(room, %{name: name, kind: :human, lurk: true, pid: self()}) do
+      {operator_lines, chat} =
+        Enum.split_with(welcome.transcript, &(&1.sender.kind == :operator))
+
       %{
         index: index,
         room_id: room_id,
@@ -146,7 +157,8 @@ defmodule PartyLineWeb.RoomLive do
         roster: welcome.roster,
         lurking: true,
         draft: "",
-        transcript: welcome.transcript
+        operator_line: operator_lines |> List.last() |> then(&(&1 && &1.body)),
+        transcript: chat
       }
     else
       _ -> nil
@@ -227,6 +239,11 @@ defmodule PartyLineWeb.RoomLive do
           </div>
 
           <div class="retro-pane-main">
+            <div class="retro-topicbar">
+              <span class="retro-operator-line">
+                {window.operator_line || "tonight: #{window.topic}"}
+              </span>
+            </div>
             <div :if={window.lurking} class="retro-lurkbar">
               <span>you're lurking — nobody can hear you breathe</span>
               <button phx-click="announce" phx-value-room={window.room_id} class="retro-btn">
@@ -245,9 +262,7 @@ defmodule PartyLineWeb.RoomLive do
                 id={dom_id}
                 class={[
                   "retro-chatline",
-                  message.sender.kind == :operator && "retro-chatline--operator",
-                  message.sender.kind != :operator &&
-                    mentions_me?(message, window.participant_id) && "retro-chatline--me"
+                  mentions_me?(message, window.participant_id) && "retro-chatline--me"
                 ]}
               >
                 <.chat_line message={message} />
