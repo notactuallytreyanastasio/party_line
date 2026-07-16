@@ -572,8 +572,7 @@ defmodule PartyLineWeb.RoomLive do
           class="retro-window retro-window--pane retro-buddies"
           phx-hook=".DraggableWindow"
           data-pos="right"
-          data-w="240"
-          data-h="440"
+          data-w="300"
         >
           <div class="retro-titlebar">
             <span class="retro-titlebar-title">★ buddy list</span>
@@ -714,8 +713,10 @@ defmodule PartyLineWeb.RoomLive do
             const ds = this.el.dataset
 
             if (ds.pos === "right") {
-              const w = parseInt(ds.w, 10), h = parseInt(ds.h, 10)
-              this.pos = { x: W - w - pad, y: pad, w, h }
+              // full height, tucked below the fixed skin-toggle button
+              const w = parseInt(ds.w, 10)
+              const y = 54
+              this.pos = { x: W - w - pad, y, w, h: H - y - pad }
             } else if (ds.pos === "cascade") {
               const w = parseInt(ds.w, 10), h = parseInt(ds.h, 10)
               const c = parseInt(ds.cx || "0", 10)
@@ -726,7 +727,7 @@ defmodule PartyLineWeb.RoomLive do
               const cols = n === 1 ? 1 : 2
               const rows = Math.ceil(n / cols)
               // leave room for the buddy list on the right
-              const w = Math.min(880, (W - 270 - pad * (cols + 1)) / cols)
+              const w = Math.min(880, (W - 330 - pad * (cols + 1)) / cols)
               const h = (H - pad * (rows + 1)) / rows
               const col = idx % cols, row = Math.floor(idx / cols)
               this.pos = { x: pad + col * (w + pad), y: pad + row * (h + pad), w, h }
