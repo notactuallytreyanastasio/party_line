@@ -83,8 +83,16 @@ defmodule PartyLineWeb.RoomLive do
 
   def handle_info({:party_line, %{type: :message, room_id: room_id} = message}, socket) do
     case window_for(socket, room_id) do
-      nil -> {:noreply, socket}
-      window -> {:noreply, stream_insert(socket, stream_name(window.index), message)}
+      nil ->
+        {:noreply, socket}
+
+      window ->
+        message = Map.put(message, :group_start, group_start?(message, window.last_group))
+
+        socket
+        |> stream_insert(stream_name(window.index), message)
+        |> update_window(room_id, &%{&1 | last_group: group_key(message)})
+        |> then(&{:noreply, &1})
     end
   end
 
@@ -148,6 +156,8 @@ defmodule PartyLineWeb.RoomLive do
       {operator_lines, chat} =
         Enum.split_with(welcome.transcript, &(&1.sender.kind == :operator))
 
+      {annotated, last_group} = annotate_groups(chat)
+
       %{
         index: index,
         room_id: room_id,
@@ -158,7 +168,8 @@ defmodule PartyLineWeb.RoomLive do
         lurking: true,
         draft: "",
         operator_line: operator_lines |> List.last() |> then(&(&1 && &1.body)),
-        transcript: chat
+        last_group: last_group,
+        transcript: annotated
       }
     else
       _ -> nil
@@ -166,6 +177,44 @@ defmodule PartyLineWeb.RoomLive do
   end
 
   defp stream_name(index), do: Enum.at(@streams, index)
+
+  # ── Slack-style message grouping ─────────────────────────────────────────
+  # Consecutive messages from one sender fold under a single name header;
+  # a gap of 5+ minutes starts a fresh group even for the same sender.
+
+  @group_gap_seconds 300
+
+  defp annotate_groups(messages) do
+    Enum.map_reduce(messages, nil, fn message, prev ->
+      annotated = Map.put(message, :group_start, group_start?(message, prev))
+      {annotated, group_key(message)}
+    end)
+  end
+
+  defp group_key(message), do: %{sender_id: message.sender.participant_id, ts: message.ts}
+
+  defp group_start?(_message, nil), do: true
+
+  defp group_start?(message, %{sender_id: sender_id, ts: prev_ts}) do
+    message.sender.participant_id != sender_id or
+      gap_seconds(prev_ts, message.ts) >= @group_gap_seconds
+  end
+
+  defp gap_seconds(prev_ts, ts) do
+    with {:ok, prev, _} <- DateTime.from_iso8601(prev_ts),
+         {:ok, cur, _} <- DateTime.from_iso8601(ts) do
+      DateTime.diff(cur, prev)
+    else
+      _ -> @group_gap_seconds
+    end
+  end
+
+  defp avatar_style(name) do
+    hue = :erlang.phash2(name, 360)
+    "background: hsl(#{hue}, 45%, 38%)"
+  end
+
+  defp initial(name), do: name |> String.first() |> String.upcase()
 
   defp window_for(socket, room_id),
     do: Enum.find(socket.assigns.windows, &(&1.room_id == room_id))
@@ -268,11 +317,37 @@ defmodule PartyLineWeb.RoomLive do
                 :for={{dom_id, message} <- @streams[stream_name(window.index)]}
                 id={dom_id}
                 class={[
-                  "retro-chatline",
+                  "retro-msg",
+                  Map.get(message, :group_start, true) && "retro-msg--start",
                   mentions_me?(message, window.participant_id) && "retro-chatline--me"
                 ]}
+                title={message.ts}
               >
-                <.chat_line message={message} />
+                <div :if={Map.get(message, :group_start, true)} class="retro-msg-head">
+                  <span
+                    class="retro-avatar"
+                    style={avatar_style(message.sender.name)}
+                    aria-hidden="true"
+                  >
+                    {initial(message.sender.name)}
+                  </span>
+                  <span class={[
+                    "retro-chatname",
+                    message.sender.kind == :bot && "retro-chatname--bot"
+                  ]}>
+                    {message.sender.name}
+                  </span>
+                  <span :if={message.sender.kind == :bot} class="retro-badge">bot</span>
+                  <time
+                    class="retro-msg-time"
+                    id={dom_id <> "-time"}
+                    phx-hook=".LocalTime"
+                    datetime={message.ts}
+                  >
+                    {String.slice(message.ts, 11, 5)}
+                  </time>
+                </div>
+                <div class="retro-msg-body">{highlight_mentions(message)}</div>
               </li>
             </ul>
 
@@ -311,6 +386,16 @@ defmodule PartyLineWeb.RoomLive do
         export default {
           mounted() { this.el.scrollTop = this.el.scrollHeight },
           updated() { this.el.scrollTop = this.el.scrollHeight }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".LocalTime">
+        export default {
+          mounted() {
+            const d = new Date(this.el.getAttribute("datetime"))
+            if (!isNaN(d)) {
+              this.el.textContent = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+            }
+          }
         }
       </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".DraggableWindow">
@@ -378,26 +463,6 @@ defmodule PartyLineWeb.RoomLive do
         }
       </script>
     </div>
-    """
-  end
-
-  defp chat_line(%{message: %{sender: %{kind: :operator}}} = assigns) do
-    ~H"""
-    <span class="retro-operator-line">{highlight_mentions(@message)}</span>
-    """
-  end
-
-  defp chat_line(assigns) do
-    ~H"""
-    <span class={[
-      "retro-chatname",
-      @message.sender.kind == :bot && "retro-chatname--bot"
-    ]}>
-      {@message.sender.name}
-    </span>
-    <span :if={@message.sender.kind == :bot} class="retro-badge">bot</span>: {highlight_mentions(
-      @message
-    )}
     """
   end
 

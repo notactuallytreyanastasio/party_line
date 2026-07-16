@@ -554,3 +554,17 @@
   cursor: nwse-resize; touch-action: none;
   background: repeating-linear-gradient(135deg, transparent 0 3px, #808080 3px 4px, #fff 4px 5px);
 }
+
+/* slack lessons, win95 clothes: grouped messages, identity blocks, rhythm */
+.retro-msg { padding: 1px 8px; }
+.retro-msg--start { margin-top: 10px; }
+.retro-msg-head { display: flex; align-items: center; gap: 7px; margin-bottom: 1px; }
+.retro-avatar {
+  width: 20px; height: 20px; flex: none; display: inline-flex;
+  align-items: center; justify-content: center;
+  color: #fff; font-size: .68rem; font-weight: 700; border: 1px solid #000;
+  text-shadow: 1px 1px 0 rgba(0,0,0,.5);
+}
+.retro-msg-time { font-size: .68rem; color: #909090; font-variant-numeric: tabular-nums; }
+.retro-msg-body { padding-left: 28px; line-height: 1.6; font-size: .93rem; overflow-wrap: anywhere; }
+.retro-msg.retro-chatline--me { background: #ffffe1; outline: 1px dotted #808080; }
