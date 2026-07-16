@@ -229,8 +229,15 @@ defmodule PartyLineWeb.RoomLive do
     ~H"""
     <div class="retro-desktop retro-desktop--switchboard">
       <pre class="retro-crash retro-directory" aria-hidden="true">{@directory}</pre>
-      <div class={["retro-multigrid", "retro-multigrid--#{length(@windows)}"]}>
-        <div :for={window <- @windows} class="retro-window retro-window--pane">
+      <div class="retro-switchboard-canvas">
+        <div
+          :for={window <- @windows}
+          id={"pane-#{window.index}"}
+          class="retro-window retro-window--pane"
+          phx-hook=".DraggableWindow"
+          data-index={window.index}
+          data-count={length(@windows)}
+        >
           <div class="retro-titlebar">
             <.link navigate={~p"/"} class="retro-close" aria-label="hang up, back to the exchange"></.link>
             <span class="retro-titlebar-title">
@@ -297,12 +304,77 @@ defmodule PartyLineWeb.RoomLive do
             <span>{window.room_id}{hosted_suffix(window.roster)}</span>
             <span>{length(window.roster)} on the line</span>
           </div>
+          <div class="retro-resize-grip" aria-hidden="true"></div>
         </div>
       </div>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".ScrollToBottom">
         export default {
           mounted() { this.el.scrollTop = this.el.scrollHeight },
           updated() { this.el.scrollTop = this.el.scrollHeight }
+        }
+      </script>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".DraggableWindow">
+        export default {
+          mounted() {
+            const idx = parseInt(this.el.dataset.index, 10)
+            const n = parseInt(this.el.dataset.count, 10)
+            const pad = 14
+            const cols = n === 1 ? 1 : 2
+            const rows = Math.ceil(n / cols)
+            const W = window.innerWidth, H = window.innerHeight
+            const w = Math.min(880, (W - pad * (cols + 1)) / cols)
+            const h = (H - pad * (rows + 1)) / rows
+            const col = idx % cols, row = Math.floor(idx / cols)
+            this.pos = { x: pad + col * (w + pad), y: pad + row * (h + pad), w, h }
+            this.apply()
+
+            this.el.addEventListener("pointerdown", () => this.raise())
+            const bar = this.el.querySelector(".retro-titlebar")
+            bar.addEventListener("pointerdown", (e) => this.startDrag(e))
+            this.el.querySelector(".retro-resize-grip")
+              .addEventListener("pointerdown", (e) => this.startResize(e))
+          },
+          // LiveView patches would drop JS-set styles; re-apply after every update
+          updated() { this.apply() },
+          apply() {
+            Object.assign(this.el.style, {
+              position: "absolute",
+              left: this.pos.x + "px", top: this.pos.y + "px",
+              width: this.pos.w + "px", height: this.pos.h + "px"
+            })
+          },
+          raise() {
+            window.__plZ = (window.__plZ || 10) + 1
+            this.el.style.zIndex = window.__plZ
+          },
+          track(move) {
+            const up = () => {
+              removeEventListener("pointermove", move)
+              removeEventListener("pointerup", up)
+            }
+            addEventListener("pointermove", move)
+            addEventListener("pointerup", up)
+          },
+          startDrag(e) {
+            if (e.target.closest("a,button,input")) return
+            e.preventDefault()
+            const sx = e.clientX - this.pos.x, sy = e.clientY - this.pos.y
+            this.track((ev) => {
+              this.pos.x = Math.max(0, Math.min(ev.clientX - sx, window.innerWidth - 120))
+              this.pos.y = Math.max(0, Math.min(ev.clientY - sy, window.innerHeight - 60))
+              this.apply()
+            })
+          },
+          startResize(e) {
+            e.preventDefault()
+            e.stopPropagation()
+            const sw = this.pos.w - e.clientX, sh = this.pos.h - e.clientY
+            this.track((ev) => {
+              this.pos.w = Math.max(340, sw + ev.clientX)
+              this.pos.h = Math.max(300, sh + ev.clientY)
+              this.apply()
+            })
+          }
         }
       </script>
     </div>
