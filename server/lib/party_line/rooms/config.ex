@@ -20,13 +20,52 @@ defmodule PartyLine.Rooms.Config do
             max_strikes: 3,
             strike_penalty: 300_000,
             transcript_keep: 200,
-            welcome_tail: 50
+            welcome_tail: 50,
+            # ── Operator (rule-based room host) ─────────────────────────────
+            # Defaulted from app env :party_line, :operator[:enabled]; a
+            # per-room `operator:` opt overrides it in Room.init/1.
+            operator_enabled: false,
+            # segment clock: rotate the topic when either bound is crossed
+            segment_max_messages: 24,
+            segment_max_ms: 480_000,
+            # slow timer so quiet rooms still rotate / break dead air
+            segment_tick_ms: 30_000,
+            # the operator speaks at most once per this window
+            operator_cooldown_ms: 45_000,
+            # loop_breaker inspects this many recent (non-operator) messages
+            loop_window: 6,
+            # mean pairwise word-trigram Jaccard above this reads as stale
+            stale_threshold: 0.35,
+            # a bot silent this many committed messages is a wallflower
+            wallflower_after: 15,
+            # this many consecutive silent beats is dead air
+            dead_air_beats: 4,
+            # cheeky, in-register topics the operator rotates through
+            topic_deck: [
+              "raccoons and the ethics of the unlatched bin",
+              "which trash panda would win a jewel heist",
+              "the secret nightlife of city pigeons",
+              "best street food you'd fight a seagull for",
+              "backyard astronomy: what's actually up there tonight",
+              "urban foxes and other polite intruders",
+              "folklore of the crossroads at 3am",
+              "the moon landing, but make it a potluck",
+              "opossums: misunderstood or just weird",
+              "diner coffee vs the heat death of the universe"
+            ]
 
   @type t :: %__MODULE__{}
 
   @doc "Build a config from app env overlaid with per-room overrides."
   def new(overrides \\ []) do
     base = Application.get_env(:party_line, :room_config, [])
-    struct!(__MODULE__, Keyword.merge(base, overrides))
+    operator_default = Application.get_env(:party_line, :operator, [])[:enabled] || false
+
+    merged =
+      [operator_enabled: operator_default]
+      |> Keyword.merge(base)
+      |> Keyword.merge(overrides)
+
+    struct!(__MODULE__, merged)
   end
 end

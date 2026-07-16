@@ -57,4 +57,32 @@ defmodule PartyLineWeb.RoomLiveTest do
     assert html =~ "Speaker"
     assert html =~ "psst"
   end
+
+  test "operator messages render as a host voice, not a speaker line", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/line")
+    view |> element("form") |> render_submit(%{name: "Watcher"})
+
+    # feed the LiveView a synthetic operator message directly — no dependency
+    # on the core agent's director code; handle_info stream-inserts any :message.
+    send(
+      view.pid,
+      {:party_line,
+       %{
+         type: :message,
+         seq: 999,
+         message_id: "m-999",
+         ts: "1996-01-01T00:00:00Z",
+         sender: %{participant_id: "p-op", name: "Operator", kind: :operator},
+         body: "that's time on raccoons. new topic: pierogi. @Bo, you start.",
+         mentions: []
+       }}
+    )
+
+    html = render(view)
+    assert html =~ "retro-operator-line"
+    assert html =~ "retro-chatline--operator"
+    assert html =~ "new topic: pierogi"
+    # host voice: no chatname span, so no "Operator:" name-colon prefix
+    refute html =~ ~r/retro-chatname[^>]*>\s*Operator/
+  end
 end

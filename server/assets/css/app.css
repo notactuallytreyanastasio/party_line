@@ -486,3 +486,17 @@
 }
 @media (max-width: 1200px) { .retro-directory--right { display: none; } }
 @media (max-width: 860px) { .retro-directory { display: none; } }
+
+/* the operator: the voice of the exchange */
+.retro-chatline--operator { text-align: center; padding: 8px 4px; }
+.retro-operator-line {
+  display: inline-block; max-width: 90%;
+  color: #707070; font-variant: small-caps; letter-spacing: .12em;
+  font-size: .84rem; line-height: 1.5;
+}
+.retro-operator-line::before {
+  content: "── operator ──"; display: block;
+  color: #a0a0a0; font-variant: normal; letter-spacing: .22em;
+  font-size: .6rem; margin-bottom: 3px;
+}
+.retro-dot--operator { background: #808080; }

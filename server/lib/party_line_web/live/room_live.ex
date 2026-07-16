@@ -179,18 +179,12 @@ defmodule PartyLineWeb.RoomLive do
                 id={dom_id}
                 class={[
                   "retro-chatline",
-                  mentions_me?(message, @participant_id) && "retro-chatline--me"
+                  message.sender.kind == :operator && "retro-chatline--operator",
+                  message.sender.kind != :operator &&
+                    mentions_me?(message, @participant_id) && "retro-chatline--me"
                 ]}
               >
-                <span class={[
-                  "retro-chatname",
-                  message.sender.kind == :bot && "retro-chatname--bot"
-                ]}>
-                  {message.sender.name}
-                </span>
-                <span :if={message.sender.kind == :bot} class="retro-badge">bot</span>: {highlight_mentions(
-                  message
-                )}
+                <.chat_line message={message} />
               </li>
               <script :type={Phoenix.LiveView.ColocatedHook} name=".ScrollToBottom">
                 export default {
@@ -222,12 +216,10 @@ defmodule PartyLineWeb.RoomLive do
             <h2>on the line</h2>
             <ul>
               <li :for={p <- @roster}>
-                <span class={[
-                  "retro-dot",
-                  (p.kind == :bot && "retro-dot--bot") || "retro-dot--human"
-                ]}></span>
+                <span class={["retro-dot", dot_class(p.kind)]}></span>
                 {p.name}
                 <span :if={p.kind == :bot} class="retro-badge">bot</span>
+                <span :if={p.kind == :operator} class="retro-badge">host</span>
                 <span :if={p.participant_id == @participant_id} style="opacity:.6; font-size:.75rem;">
                   (you)
                 </span>
@@ -237,7 +229,7 @@ defmodule PartyLineWeb.RoomLive do
         </div>
 
         <div class="retro-statusbar">
-          <span>connected · {@room_id}</span>
+          <span>connected · {@room_id}{hosted_suffix(@roster)}</span>
           <span>{length(@roster)} on the line</span>
         </div>
       </div>
@@ -246,6 +238,34 @@ defmodule PartyLineWeb.RoomLive do
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────────
+
+  # The operator is the voice of the exchange: a host line, not a speaker.
+  # It renders centered and name-less; every other kind keeps the Name: body
+  # form. Mentions stay highlighted in both.
+  defp chat_line(%{message: %{sender: %{kind: :operator}}} = assigns) do
+    ~H"""
+    <span class="retro-operator-line">{highlight_mentions(@message)}</span>
+    """
+  end
+
+  defp chat_line(assigns) do
+    ~H"""
+    <span class={["retro-chatname", @message.sender.kind == :bot && "retro-chatname--bot"]}>
+      {@message.sender.name}
+    </span>
+    <span :if={@message.sender.kind == :bot} class="retro-badge">bot</span>: {highlight_mentions(
+      @message
+    )}
+    """
+  end
+
+  defp dot_class(:bot), do: "retro-dot--bot"
+  defp dot_class(:operator), do: "retro-dot--operator"
+  defp dot_class(_), do: "retro-dot--human"
+
+  defp hosted_suffix(roster) do
+    if Enum.any?(roster, &(&1.kind == :operator)), do: " · hosted line", else: ""
+  end
 
   # The desktop behind the window is a page torn from the exchange's phone
   # book: every bot currently on the line, set grey on the blue, KLondike-5

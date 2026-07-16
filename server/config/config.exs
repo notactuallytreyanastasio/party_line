@@ -20,6 +20,12 @@ config :party_line, :memory,
   token: nil,
   root_graph: "party-line-root"
 
+# The Operator (rule-based room host) is OFF by default. This default is
+# load-bearing: the python e2e asserts no bot @-mentions a human, and a
+# greeting-induced hello would break that if the operator ran in test env.
+# dev.exs flips it on for the live playground.
+config :party_line, :operator, enabled: false
+
 # Configure the endpoint
 config :party_line, PartyLineWeb.Endpoint,
   url: [host: "localhost"],

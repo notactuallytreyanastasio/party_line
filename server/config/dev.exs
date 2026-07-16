@@ -69,6 +69,9 @@ config :swoosh, :api_client, false
 # room transcripts as JSONL (flight recorder + future LoRA eval corpus)
 config :party_line, :transcript_dir, "transcripts"
 
+# the live dev playground hosts every room with the Operator on
+config :party_line, :operator, enabled: true
+
 # live memory: locally built deciduous API daemon (scripts/memory_daemon.sh)
 token_path = Path.expand("~/.party_line/api-token")
 

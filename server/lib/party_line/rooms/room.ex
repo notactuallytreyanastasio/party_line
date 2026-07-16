@@ -32,7 +32,7 @@ defmodule PartyLine.Rooms.Room do
   use GenServer, restart: :transient
 
   alias PartyLine.Mentions
-  alias PartyLine.Rooms.Config
+  alias PartyLine.Rooms.{Config, Operator}
 
   # ── Client API ──────────────────────────────────────────────────────────
 
@@ -85,20 +85,60 @@ defmodule PartyLine.Rooms.Room do
             timer: nil,
             strikes: %{},
             quarantined: %{},
-            silent_beats: 0
+            silent_beats: 0,
+            # ── Operator (rule-based host) ──────────────────────────────────
+            initial_topic: nil,
+            segment: nil,
+            last_operator_ms: nil,
+            # set when a trigger fires while a grant is live; drained on
+            # the next grant resolution
+            operator_pending: false,
+            # seq bookkeeping for the wallflower / rotation policies
+            spoke_at: %{},
+            summoned_at: %{},
+            joined_at: %{},
+            # capped queue of human "@Operator topic: …" suggestions
+            suggestions: []
 
   # ── Callbacks ───────────────────────────────────────────────────────────
 
   @impl true
   def init(opts) do
+    config =
+      case Keyword.fetch(opts, :operator) do
+        {:ok, enabled} -> %{base_config(opts) | operator_enabled: enabled}
+        :error -> base_config(opts)
+      end
+
+    topic = Keyword.get(opts, :topic, "whatever is on your mind")
+    now = System.monotonic_time(:millisecond)
+
     state = %__MODULE__{
       id: Keyword.fetch!(opts, :id),
-      topic: Keyword.get(opts, :topic, "whatever is on your mind"),
-      config: Keyword.get(opts, :config) || Config.new()
+      topic: topic,
+      initial_topic: topic,
+      config: config,
+      segment: %{topic: topic, started_at_ms: now, messages: 0}
     }
+
+    state = if config.operator_enabled, do: add_operator(state), else: state
+    if config.operator_enabled, do: schedule_segment_tick(config)
 
     {:ok, state}
   end
+
+  defp base_config(opts), do: Keyword.get(opts, :config) || Config.new()
+
+  # The operator is a pid-less, unmonitored participant: it appears in the
+  # roster and speaks through the normal commit path but has no socket and
+  # never bids or receives beats/grants.
+  defp add_operator(state) do
+    op = %P{id: "p-operator", name: "Operator", kind: :operator, pid: nil, monitor: nil}
+    %{state | participants: Map.put(state.participants, op.id, op)}
+  end
+
+  defp schedule_segment_tick(config),
+    do: Process.send_after(self(), :segment_tick, config.segment_tick_ms)
 
   @impl true
   def handle_call({:join, attrs}, _from, state) do
@@ -132,6 +172,14 @@ defmodule PartyLine.Rooms.Room do
     }
 
     state = maybe_wake(state, kind)
+    state = if kind == :bot, do: note_joined(state, id), else: state
+
+    # a human picking up gives the operator someone to introduce
+    state =
+      if visible and kind == :human,
+        do: maybe_run_operator(state, greet: %{name: participant.name}),
+        else: state
+
     {:reply, {:ok, welcome}, state}
   end
 
@@ -141,6 +189,12 @@ defmodule PartyLine.Rooms.Room do
         p = %{p | visible: true}
         state = put_in(state.participants[participant_id], p)
         broadcast_presence(state, p, :announced)
+
+        state =
+          if p.kind == :human,
+            do: maybe_run_operator(state, greet: %{name: p.name}),
+            else: state
+
         {:reply, :ok, state}
 
       %P{} ->
@@ -203,6 +257,14 @@ defmodule PartyLine.Rooms.Room do
 
   def handle_info({:grant_timeout, grant_id}, %{current_grant: %{id: grant_id}} = state),
     do: {:noreply, grant_timeout(state)}
+
+  # Slow operator heartbeat: rotates stale/aged segments and fills dead air in
+  # quiet rooms where no commit is arriving to drive evaluation.
+  def handle_info(:segment_tick, state) do
+    state = maybe_run_operator(state)
+    if state.config.operator_enabled, do: schedule_segment_tick(state.config)
+    {:noreply, state}
+  end
 
   def handle_info(_stale, state), do: {:noreply, state}
 
@@ -362,7 +424,8 @@ defmodule PartyLine.Rooms.Room do
 
     state = %{state | current_grant: nil, strikes: strikes, quarantined: quarantined}
     # the room was already waiting — re-open bidding immediately
-    open_beat(state, state.config.bid_window)
+    state = open_beat(state, state.config.bid_window)
+    resolve_pending(state)
   end
 
   defp revoke_grant(state, reason) do
@@ -388,8 +451,14 @@ defmodule PartyLine.Rooms.Room do
             strikes: Map.delete(state.strikes, p.id)
         }
 
-        state = commit_message(state, p, body)
-        schedule_cooldown(state)
+        state =
+          state
+          |> commit_message(p, body)
+          |> bump_segment()
+          |> note_spoke(p)
+          |> schedule_cooldown()
+
+        maybe_run_operator(state)
 
       _ ->
         # dead or foreign grant: the text was generated against a stale
@@ -410,6 +479,9 @@ defmodule PartyLine.Rooms.Room do
       state
       |> revoke_grant(:preempted)
       |> commit_message(p, body)
+      |> bump_segment()
+
+    {state, operator_opts} = maybe_capture_suggestion(state, body)
 
     # invalidate any open beat (bids for it are now stale) and schedule a
     # fast beat so an @-mentioned bot can answer promptly
@@ -417,7 +489,7 @@ defmodule PartyLine.Rooms.Room do
     counter = state.beat_counter + 1
     state = cancel_timer(state)
 
-    %{
+    state = %{
       state
       | phase: :cooldown,
         beat_counter: counter,
@@ -428,6 +500,21 @@ defmodule PartyLine.Rooms.Room do
             state.config.preempt_cooldown
           )
     }
+
+    maybe_run_operator(state, operator_opts)
+  end
+
+  # "@Operator topic: <text>" (case-insensitive) enqueues a topic suggestion
+  # (queue capped at 12) and asks the operator to acknowledge it.
+  defp maybe_capture_suggestion(state, body) do
+    case Regex.run(~r/^\s*@operator\s+topic:\s*(\S.*?)\s*$/i, body) do
+      [_, text] ->
+        suggestions = Enum.take(state.suggestions ++ [text], -12)
+        {%{state | suggestions: suggestions}, ack_topic: text}
+
+      _ ->
+        {state, []}
+    end
   end
 
   defp commit_message(state, %P{} = sender, body) do
@@ -455,6 +542,120 @@ defmodule PartyLine.Rooms.Room do
         transcript: Enum.take([message | state.transcript], state.config.transcript_keep)
     }
   end
+
+  # ── Operator (rule-based host) ──────────────────────────────────────────
+
+  # Run the policy, unless the operator is disabled or a grant is live — in
+  # the latter case remember to try again once the floor clears (an operator
+  # message must never race a bot's in-flight reply).
+  defp maybe_run_operator(state, opts \\ []) do
+    cond do
+      not state.config.operator_enabled -> state
+      state.phase == :granted -> %{state | operator_pending: true}
+      true -> run_operator(%{state | operator_pending: false}, opts)
+    end
+  end
+
+  defp resolve_pending(%{operator_pending: true} = state),
+    do: maybe_run_operator(%{state | operator_pending: false})
+
+  defp resolve_pending(state), do: state
+
+  defp run_operator(state, opts) do
+    case Operator.evaluate(build_view(state, opts), state.config) do
+      :quiet ->
+        state
+
+      {:speak, body} ->
+        operator_commit(state, body)
+
+      {:speak_and_rotate, body, new_topic} ->
+        state |> operator_commit(body) |> rotate_segment(new_topic)
+    end
+  end
+
+  # The operator speaks through the normal commit path (seq, transcript,
+  # JSONL, memory ingest) but is bookkept separately: it never recurses, its
+  # message doesn't count toward the segment, and any bot it @-summons has its
+  # wallflower cooldown reset.
+  defp operator_commit(state, body) do
+    op = state.participants["p-operator"]
+
+    state
+    |> commit_message(op, body)
+    |> note_summons(body)
+    |> Map.put(:last_operator_ms, System.monotonic_time(:millisecond))
+  end
+
+  defp rotate_segment(state, new_topic) do
+    now = System.monotonic_time(:millisecond)
+    %{state | topic: new_topic, segment: %{topic: new_topic, started_at_ms: now, messages: 0}}
+  end
+
+  # Everything the policy needs, derived from room state. Operator messages are
+  # excluded from the loop / staleness windows and the segment message count.
+  defp build_view(state, opts) do
+    recent =
+      state.transcript
+      |> Enum.reject(&(&1.sender.kind == :operator))
+      |> Enum.take(state.config.loop_window)
+      |> Enum.reverse()
+      |> Enum.map(
+        &%{sender_id: &1.sender.participant_id, kind: &1.sender.kind, body: &1.body, seq: &1.seq}
+      )
+
+    %{
+      now_ms: System.monotonic_time(:millisecond),
+      cur_seq: state.seq,
+      topic: state.topic,
+      segment: state.segment,
+      recent: recent,
+      bots: present_bots(state),
+      silent_beats: state.silent_beats,
+      last_operator_ms: state.last_operator_ms,
+      spoke_at: state.spoke_at,
+      summoned_at: state.summoned_at,
+      joined_at: state.joined_at,
+      topic_deck: topic_pool(state),
+      suggestions: state.suggestions,
+      ack_topic: opts[:ack_topic],
+      greet: opts[:greet]
+    }
+  end
+
+  defp present_bots(state) do
+    state.participants
+    |> Map.values()
+    |> Enum.filter(&(&1.visible and &1.kind == :bot))
+    |> Enum.sort_by(& &1.id)
+    |> Enum.map(&%{id: &1.id, name: &1.name})
+  end
+
+  defp topic_pool(state),
+    do: Enum.uniq(state.config.topic_deck ++ [state.initial_topic] ++ state.suggestions)
+
+  defp note_joined(state, id), do: %{state | joined_at: Map.put(state.joined_at, id, state.seq)}
+
+  defp note_spoke(state, %P{id: id}),
+    do: %{state | spoke_at: Map.put(state.spoke_at, id, state.seq)}
+
+  # Any bot the operator @-mentions has its wallflower cooldown refreshed.
+  defp note_summons(state, body) do
+    ids =
+      body
+      |> Mentions.parse(roster(state))
+      |> Enum.filter(&(&1.kind == :bot))
+      |> Enum.map(& &1.participant_id)
+
+    summoned_at =
+      Enum.reduce(ids, state.summoned_at, &Map.put(&2, &1, state.seq))
+
+    %{state | summoned_at: summoned_at}
+  end
+
+  # Only bot/human commits reach here (the operator commits via operator_commit),
+  # so every counted message is genuinely a non-operator one.
+  defp bump_segment(state), do: update_in(state.segment.messages, &(&1 + 1))
 
   # ── Participants ────────────────────────────────────────────────────────
 
@@ -522,6 +723,7 @@ defmodule PartyLine.Rooms.Room do
     except = opts[:except]
 
     for {_, p} <- state.participants,
+        p.pid != nil,
         only_kind == nil or p.kind == only_kind,
         p.id != except do
       send_to(p, event)

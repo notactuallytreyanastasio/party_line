@@ -274,6 +274,12 @@
             TTL heartbeats, deregister on stop</td>
         <td>"use the LLM as a source for chat til they stop running the daemon" — presence is
             the daemon's heartbeat; tailscale is the security boundary by default</td></tr>
+      <tr><td><code>309</code> <span class="pill locked">locked</span></td>
+        <td>Operator v1 — a rule-based virtual participant (<code>kind: operator</code>) that hosts the
+            room: a segment clock + topic deck plus a priority trigger table; the LLM host voice is deferred</td>
+        <td>The social physics already make a moderator free — an @-mention <em>is</em> enforcement (summon at
+            0.95, gag everyone else at 0.05), so a host needs no new turn-taking, just the normal message path;
+            rules ship now and stay legible, an LLM voice can slot in later behind the same trigger table</td></tr>
       <tr><td><code>269</code> <span class="pill later">later</span></td>
         <td>Interactive persona designer for privileged deployers</td>
         <td>Deferred until we know what a good prime directive looks like in the wild</td></tr>
@@ -387,6 +393,50 @@ scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
   </ul>
   <p>All timings live in <code>PartyLine.Rooms.Config</code> and are injected per-room — tests run the
      same machine at millisecond scale.</p>
+
+  <h3>The Operator <span class="pill done">v1</span></h3>
+  <p>
+    A room can be <em>hosted</em>. The Operator (node 309) is a rule-based virtual participant —
+    name <code>Operator</code>, <code>kind: operator</code> — that keeps a line moving. It is off by
+    default and enabled per-room (<code>operator: true</code>, defaulted from
+    <code>:party_line, :operator</code>; on in dev). It never bids and never receives beats or grants:
+    it only ever <em>speaks</em>, through the same <code>commit_message</code> path everyone uses, so its
+    lines get a seq, hit the transcript/JSONL/memory, and appear in every client's roster with a grey
+    dot and a <strong>host</strong> badge. The insight that makes this cheap: <strong>an @-mention already
+    <em>is</em> enforcement</strong> — a summoned bot bids 0.95 and everyone else is gagged to 0.05 — so
+    the host needs no new turn-taking machinery, just a well-timed message.
+  </p>
+  <p>
+    Under the Operator sits a <strong>segment clock</strong>: each segment carries a topic and rotates when
+    it runs long (message count or age) or goes stale. Rotation pops the next entry from a
+    <strong>topic deck</strong> (in-register defaults + the room's opening topic + human suggestions) and
+    announces it, handing the first turn to whoever has spoken least recently:
+    <em>'that's time on "raccoons". new topic: pierogi. @Bo, you start.'</em> Anyone can stock the deck with
+    <code>@Operator topic: &lt;text&gt;</code> — the Operator acks <em>"noted. it goes in the deck."</em>
+    Rotation also updates the room topic, so welcomes and new joiners see where the line is now.
+  </p>
+  <p>The Operator fires at most once per cooldown, never while a grant is live (a trigger that fires mid-grant
+     is held pending), and evaluates a <strong>priority trigger table</strong> after each committed message and
+     on a slow timer for quiet rooms:</p>
+  <ul>
+    <li><strong>Loop breaker</strong> — the last several messages ping-pong between exactly two senders while a
+      third bot is present: <em>'you two have been at it a while. @&lt;third&gt;, weigh in or we change the
+      subject.'</em> No third bot ⇒ rotate the topic instead.</li>
+    <li><strong>Staleness rotation</strong> — the segment expired, or the last six messages are too similar
+      (mean pairwise Jaccard over word-trigram sets crosses a threshold — a pure
+      <code>PartyLine.Rooms.Staleness.stale?/2</code>): end the segment early and rotate.</li>
+    <li><strong>Wallflower</strong> — a bot that's been present but silent for many messages gets a nudge:
+      <em>'@&lt;bot&gt;, you've been quiet. thoughts?'</em> — with a per-bot cooldown so it never nags.</li>
+    <li><strong>Dead air</strong> — several consecutive silent beats: toss a deck prompt to restart the room
+      without rotating the segment.</li>
+    <li><strong>Greeting</strong> — a human picks up (or announces): <em>'&lt;name&gt; just picked up. someone
+      say hi.'</em> — deliberately <em>un</em>-mentioned, so nobody is gagged and anyone can greet.</li>
+  </ul>
+  <p>
+    Operator lines count toward the transcript but are <em>excluded</em> from the segment message count and the
+    staleness window, and can never trigger the Operator itself — no host talking to itself, no recursion. All
+    of it is knob-driven through <code>Config</code>, so the whole host runs at millisecond scale in tests.
+  </p>
 </section>
 
 <section id="harness">
@@ -452,7 +502,9 @@ scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
           <td>Last 50 messages; roster excludes lurkers.</td></tr>
       <tr><td><code>presence</code></td><td><code>event, participant</code></td><td><code>event</code> ∈ joined|left|announced.</td></tr>
       <tr><td><code>message</code></td><td><code>seq, message_id, ts, sender{...,kind}, body, mentions[]</code></td>
-          <td><code>seq</code> is the room's total order. <code>mentions</code> are structured
+          <td><code>seq</code> is the room's total order. <code>sender.kind</code> ∈ bot|human|operator
+              (the <a href="#director">Operator</a> is an internal participant that never holds a socket, yet
+              its lines serialize like any other). <code>mentions</code> are structured
               (<code>@horse dentist</code> resolves to the roster entry — multi-word names work).</td></tr>
       <tr><td><code>beat</code></td><td><code>beat_id, window_ms, last_seq</code></td><td>Bots only; humans never see director traffic.</td></tr>
       <tr><td><code>grant</code></td><td><code>grant_id, deadline_ms, context_seq</code></td><td>Winner only. Respect <code>deadline_ms</code> as a hard budget.</td></tr>
@@ -583,7 +635,7 @@ friends: []                  # reserved — bot friends list</code></pre>
 
 <footer>
   party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–280) ·
-  last aligned with the code: 2026-07-15 (milestone 1 acceptance)
+  last aligned with the code: 2026-07-16 (milestone 1 acceptance)
 </footer>
 </main>
 </div>
