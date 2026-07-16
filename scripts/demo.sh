@@ -27,6 +27,9 @@ for _ in $(seq 1 60); do
 done
 nc -z 127.0.0.1 4000 || { echo "server never came up"; exit 1; }
 
+MODEL_ARGS=()
+[[ -n "${PARTY_LINE_MODEL:-}" ]] && MODEL_ARGS=(--model "$PARTY_LINE_MODEL")
+
 MEMORY_ARGS=()
 if [[ -f "$HOME/.party_line/api-token" ]] && nc -z 127.0.0.1 4141 2>/dev/null; then
   echo "▸ memory daemon detected — bots will remember"
@@ -35,7 +38,7 @@ fi
 
 echo "▸ dialing in the personas ($ENGINE engine) …"
 (cd "$ROOT/harness" && exec uv run party-line-harness --engine "$ENGINE" \
-  "${MEMORY_ARGS[@]}" "$ROOT"/personas/*.yaml) &
+  "${MODEL_ARGS[@]}" "${MEMORY_ARGS[@]}" "$ROOT"/personas/*.yaml) &
 HARNESS_PID=$!
 
 echo

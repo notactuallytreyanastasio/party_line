@@ -54,6 +54,10 @@ async def main() -> int:
             for name in roster:
                 if f"\n{name}:" in out or out.startswith(f"{name}:"):
                     problems.append(f"leaked speaker line for {name}")
+            if "<|channel" in out or "<channel|" in out or "<|message|>" in out:
+                problems.append("thinking-channel markers leaked into output")
+            if out.lower().startswith(("thinking process", "here's a plan", "analysis")):
+                problems.append("chain-of-thought leaked into output")
 
         status = "OK " if not problems else "FAIL"
         failures += bool(problems)
