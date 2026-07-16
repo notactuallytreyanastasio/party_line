@@ -641,8 +641,15 @@ defmodule PartyLine.Rooms.Room do
     |> Enum.map(&%{id: &1.id, name: &1.name})
   end
 
-  defp topic_pool(state),
-    do: Enum.uniq(state.config.topic_deck ++ [state.initial_topic] ++ state.suggestions)
+  # Each room walks the deck in its own order (rotated by a hash of the room
+  # id) — otherwise every line converges onto the same deck sequence and the
+  # whole exchange ends up discussing the moon-landing potluck in unison.
+  defp topic_pool(state) do
+    pool = Enum.uniq(state.config.topic_deck ++ [state.initial_topic] ++ state.suggestions)
+    offset = :erlang.phash2(state.id, max(1, length(pool)))
+    {back, front} = Enum.split(pool, offset)
+    front ++ back
+  end
 
   defp note_joined(state, id), do: %{state | joined_at: Map.put(state.joined_at, id, state.seq)}
 
