@@ -614,3 +614,4 @@
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   font-size: .78rem; color: #606060;
 }
+.retro-clipbar-error { color: #aa0000; font-size: .75rem; white-space: nowrap; }

@@ -76,7 +76,7 @@ defmodule PartyLineWeb.RoomLive do
   # ── Clipping (client hook pushes the selection; ids are message_ids) ─────
 
   def handle_event("select", %{"room" => room_id, "ids" => ids}, socket) when is_list(ids) do
-    {:noreply, update_window(socket, room_id, &%{&1 | selected: ids})}
+    {:noreply, update_window(socket, room_id, &%{&1 | selected: ids, clip_error: nil})}
   end
 
   def handle_event("clip_wall", %{"room" => room_id} = params, socket) do
@@ -96,18 +96,26 @@ defmodule PartyLineWeb.RoomLive do
     {:noreply, clear_selection(socket, room_id)}
   end
 
-  def handle_event("clip_share", %{"room" => room_id, "buddy" => buddy}, socket)
-      when buddy != "" do
-    with %{selected: [_ | _]} = window <- window_for(socket, room_id),
+  def handle_event("clip_share", %{"room" => room_id, "buddy" => buddy}, socket) do
+    buddy = String.trim(buddy)
+    valid? = buddy != socket.assigns.name and buddy in Buddies.online()
+
+    with true <- valid?,
+         %{selected: [_ | _]} = window <- window_for(socket, room_id),
          [_ | _] = messages <- selected_messages(window) do
       {:ok, _} =
         DMs.send_dm(socket.assigns.name, buddy, "clipped from #{room_id}",
           kind: :clip,
           quoted: messages
         )
-    end
 
-    {:noreply, clear_selection(socket, room_id)}
+      {:noreply, clear_selection(socket, room_id)}
+    else
+      # keep the selection so they can retry with a real name
+      _ ->
+        {:noreply,
+         update_window(socket, room_id, &%{&1 | clip_error: "nobody by that name is on"})}
+    end
   end
 
   def handle_event("clip_clear", %{"room" => room_id}, socket) do
@@ -255,6 +263,7 @@ defmodule PartyLineWeb.RoomLive do
         lurking: true,
         draft: "",
         selected: [],
+        clip_error: nil,
         operator_line: operator_lines |> List.last() |> then(&(&1 && &1.body)),
         last_group: last_group,
         transcript: annotated
@@ -489,15 +498,23 @@ defmodule PartyLineWeb.RoomLive do
                 class="retro-input retro-clipbar-note"
               />
               <button type="submit" class="retro-btn">😂 to the wall</button>
-              <select
-                name="buddy"
-                class="retro-input retro-clipbar-buddy"
-                form={"clipshare-#{window.index}"}
-              >
-                <option value="">share with…</option>
-                <option :for={b <- @buddies} :if={b != @name} value={b}>{b}</option>
-              </select>
-              <button type="submit" form={"clipshare-#{window.index}"} class="retro-btn">send</button>
+              <%= if others(@buddies, @name) != [] do %>
+                <input
+                  type="text"
+                  name="buddy"
+                  form={"clipshare-#{window.index}"}
+                  list={"buddies-dl-#{window.index}"}
+                  placeholder="share with… (type a name)"
+                  autocomplete="off"
+                  class="retro-input retro-clipbar-buddy"
+                />
+                <datalist id={"buddies-dl-#{window.index}"}>
+                  <option :for={b <- others(@buddies, @name)} value={b} />
+                </datalist>
+                <button type="submit" form={"clipshare-#{window.index}"} class="retro-btn">
+                  send
+                </button>
+              <% end %>
               <button
                 type="button"
                 phx-click="clip_clear"
@@ -506,6 +523,7 @@ defmodule PartyLineWeb.RoomLive do
               >
                 ✕
               </button>
+              <span :if={window.clip_error} class="retro-clipbar-error">{window.clip_error}</span>
             </form>
             <form
               :if={window.selected != []}
@@ -766,6 +784,8 @@ defmodule PartyLineWeb.RoomLive do
     </div>
     """
   end
+
+  defp others(buddies, name), do: Enum.reject(buddies, &(&1 == name))
 
   defp hosted_suffix(roster) do
     if Enum.any?(roster, &(&1.kind == :operator)), do: " · hosted", else: ""

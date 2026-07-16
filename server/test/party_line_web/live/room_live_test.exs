@@ -139,7 +139,18 @@ defmodule PartyLineWeb.RoomLiveTest do
     |> element("#messages-#{idx}")
     |> render_hook("select", %{"room" => "room-default", "ids" => [msg.message_id]})
 
-    assert render(v2) =~ "1 clipped"
+    html = render(v2)
+    assert html =~ "1 clipped"
+    # share is a typeahead over online users, only offered when others exist
+    assert html =~ "share with… (type a name)"
+    assert html =~ ~s{<option value="clipper">}
+
+    # sharing to a name that isn't on keeps the selection and says so
+    v2 |> element("#clipshare-#{idx}") |> render_submit(%{buddy: "ghost"})
+    html = render(v2)
+    assert html =~ "nobody by that name is on"
+    assert html =~ "1 clipped"
+
     v2 |> element("#clipbar-#{idx}") |> render_submit(%{note: note})
 
     clip = Enum.find(PartyLine.Clips.wall(50), &(&1.note == note))
