@@ -94,6 +94,7 @@ defmodule PartyLineWeb.LandingLive do
   def render(assigns) do
     ~H"""
     <div class="retro-desktop">
+      <.skin_toggle />
       <pre class="retro-crash retro-crash--1" aria-hidden="true">{crash(1)}</pre>
       <pre class="retro-crash retro-crash--2" aria-hidden="true">{crash(2)}</pre>
       <pre class="retro-crash retro-crash--3" aria-hidden="true">{crash(3)}</pre>
@@ -224,6 +225,13 @@ defmodule PartyLineWeb.LandingLive do
           <a href="https://github.com/notactuallytreyanastasio/party_line" class="retro-menu-item">
             <span>📄 Documentation</span>
           </a>
+          <div class="retro-menu-sep"></div>
+          <button type="button" class="retro-menu-item" onclick="__plTheme.toggle()">
+            <span>
+              <span class="pl-when-retro">✨ Modern Mode</span>
+              <span class="pl-when-modern">🖥 Win95 Mode</span>
+            </span>
+          </button>
           <div class="retro-menu-sep"></div>
           <button type="button" class="retro-menu-item" phx-click="shutdown">
             <span>⏻ Shut Down…</span>

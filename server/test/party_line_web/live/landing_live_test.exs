@@ -22,6 +22,10 @@ defmodule PartyLineWeb.LandingLiveTest do
     # links to the two doors
     assert html =~ ~s(href="/host")
     assert html =~ ~s(href="/line")
+
+    # the skin switch is offered top-right (and again in the Start menu)
+    assert html =~ "pl-theme-toggle"
+    assert html =~ "modern mode"
   end
 
   test "the desktop has a taskbar, and Start cascades into the room browser", %{conn: conn} do

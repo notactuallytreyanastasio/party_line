@@ -58,6 +58,7 @@ defmodule PartyLineWeb.HostLive do
   def render(assigns) do
     ~H"""
     <div class="retro-desktop">
+      <.skin_toggle />
       <div class="retro-window">
         <div class="retro-titlebar">
           <.link navigate={~p"/"} class="retro-close" aria-label="close, back to the exchange"></.link>

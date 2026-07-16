@@ -32,6 +32,26 @@ defmodule PartyLineWeb.CoreComponents do
   alias Phoenix.LiveView.JS
 
   @doc """
+  The skin switch: retro (win95, default) ⇄ modern. Pure client-side —
+  `__plTheme.toggle/0` in the root layout flips `data-pl-theme` on <html>
+  and persists to localStorage; all styling hangs off that attribute.
+  """
+  def skin_toggle(assigns) do
+    ~H"""
+    <button
+      type="button"
+      id="pl-theme-toggle"
+      class="pl-theme-toggle"
+      onclick="__plTheme.toggle()"
+      title="switch look"
+    >
+      <span class="pl-when-retro">✨ modern mode</span>
+      <span class="pl-when-modern">🖥 win95 mode</span>
+    </button>
+    """
+  end
+
+  @doc """
   Renders flash notices.
 
   ## Examples

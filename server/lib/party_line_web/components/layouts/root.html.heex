@@ -9,6 +9,23 @@
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>
     <script>
+      // party line skin: "retro" (win95, default) or "modern". Set before
+      // first paint to avoid a flash of the other world.
+      (() => {
+        const saved = localStorage.getItem("pl:theme") || "retro";
+        document.documentElement.setAttribute("data-pl-theme", saved);
+        window.__plTheme = {
+          toggle() {
+            const next =
+              document.documentElement.getAttribute("data-pl-theme") === "modern"
+                ? "retro" : "modern";
+            document.documentElement.setAttribute("data-pl-theme", next);
+            localStorage.setItem("pl:theme", next);
+          }
+        };
+      })();
+    </script>
+    <script>
       (() => {
         const systemTheme = () => matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 

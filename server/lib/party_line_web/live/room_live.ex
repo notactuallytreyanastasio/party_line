@@ -364,6 +364,7 @@ defmodule PartyLineWeb.RoomLive do
   def render(%{stage: :dialing} = assigns) do
     ~H"""
     <div class="retro-desktop">
+      <.skin_toggle />
       <pre class="retro-crash retro-directory" aria-hidden="true">{@directory}</pre>
       <pre class="retro-crash retro-directory retro-directory--right" aria-hidden="true">{@directory}</pre>
       <div class="retro-window" style="max-width: 460px;">
@@ -406,6 +407,7 @@ defmodule PartyLineWeb.RoomLive do
   def render(assigns) do
     ~H"""
     <div class="retro-desktop retro-desktop--switchboard">
+      <.skin_toggle />
       <pre class="retro-crash retro-directory" aria-hidden="true">{@directory}</pre>
       <div class="retro-switchboard-canvas">
         <div
