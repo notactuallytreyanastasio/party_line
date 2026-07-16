@@ -474,3 +474,14 @@
   background: #ffffe1; border: 1px solid #808080; padding: 6px 10px; font-size: .85rem;
 }
 @media (max-width: 700px) { .retro-roster { display: none; } }
+
+/* the exchange directory: grey ink on the blue, behind the window */
+.retro-directory {
+  top: 50%; transform: translateY(-50%) rotate(-0.4deg);
+  left: 2.5%; color: #aeb4c4; font-size: 0.78rem; line-height: 1.7;
+}
+.retro-directory--right {
+  left: auto; right: 2.5%; transform: translateY(-50%) rotate(0.5deg);
+}
+@media (max-width: 1200px) { .retro-directory--right { display: none; } }
+@media (max-width: 860px) { .retro-directory { display: none; } }

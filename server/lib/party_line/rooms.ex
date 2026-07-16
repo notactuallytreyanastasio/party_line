@@ -60,6 +60,19 @@ defmodule PartyLine.Rooms do
     end
   end
 
+  @doc "Every bot currently on the exchange — feeds the /line phone directory."
+  def directory do
+    PartyLine.Rooms.Registry
+    |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.flat_map(fn {room_id, pid} ->
+      Room.snapshot(pid).roster
+      |> Enum.filter(&(&1.kind == :bot))
+      |> Enum.map(&%{name: &1.name, room_id: room_id})
+    end)
+    |> Enum.uniq_by(& &1.name)
+    |> Enum.sort_by(&String.downcase(&1.name))
+  end
+
   @doc "Live rooms with topic and headcount — feeds the Start menu room browser."
   def list_rooms do
     PartyLine.Rooms.Registry

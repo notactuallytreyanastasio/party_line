@@ -19,6 +19,7 @@ defmodule PartyLineWeb.RoomLive do
      |> assign(page_title: "Party Line", stage: :dialing, name: "", error: nil)
      |> assign(room: nil, room_id: nil, topic: nil, participant_id: nil)
      |> assign(roster: [], lurking: true, draft: "")
+     |> assign(directory: directory_text())
      |> stream_configure(:messages, dom_id: &"msg-#{&1.message_id}")
      |> stream(:messages, [])}
   end
@@ -113,6 +114,8 @@ defmodule PartyLineWeb.RoomLive do
   def render(%{stage: :dialing} = assigns) do
     ~H"""
     <div class="retro-desktop">
+      <pre class="retro-crash retro-directory" aria-hidden="true">{@directory}</pre>
+      <pre class="retro-crash retro-directory retro-directory--right" aria-hidden="true">{@directory}</pre>
       <div class="retro-window" style="max-width: 460px;">
         <div class="retro-titlebar">
           <.link navigate={~p"/"} class="retro-close" aria-label="hang up, back to the exchange"></.link>
@@ -153,6 +156,8 @@ defmodule PartyLineWeb.RoomLive do
   def render(assigns) do
     ~H"""
     <div class="retro-desktop">
+      <pre class="retro-crash retro-directory" aria-hidden="true">{@directory}</pre>
+      <pre class="retro-crash retro-directory retro-directory--right" aria-hidden="true">{@directory}</pre>
       <div class="retro-window retro-window--app">
         <div class="retro-titlebar">
           <.link navigate={~p"/"} class="retro-close" aria-label="hang up, back to the exchange"></.link>
@@ -241,6 +246,55 @@ defmodule PartyLineWeb.RoomLive do
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────────
+
+  # The desktop behind the window is a page torn from the exchange's phone
+  # book: every bot currently on the line, set grey on the blue, KLondike-5
+  # numbers derived from their names. Built as a string so neither HEEx nor
+  # mix format can re-flow the dot leaders.
+  @directory_width 34
+
+  defp directory_text do
+    subscribers =
+      case Rooms.directory() do
+        [] ->
+          [directory_line("(no subscribers yet)", "KL5-0000")]
+
+        bots ->
+          Enum.map(bots, fn %{name: name} ->
+            directory_line(String.upcase(name), klondike(name))
+          end)
+      end
+
+    header = [
+      "PARTY LINE TELEPHONE DIRECTORY",
+      "winter 1995/96 · greater exchange area",
+      String.duplicate("─", @directory_width + 10),
+      ""
+    ]
+
+    footer = [
+      "",
+      directory_line("OPERATOR", "0"),
+      directory_line("TIME & WEATHER", "KL5-TIME"),
+      directory_line("THE 3AM LINE", "after dark"),
+      directory_line("MASQUERADE LINE", "unlisted"),
+      "",
+      "calls placed after midnight will be",
+      "connected anyway. the exchange never",
+      "sleeps and neither do the subscribers."
+    ]
+
+    Enum.join(header ++ subscribers ++ footer, "\n")
+  end
+
+  defp directory_line(label, number) do
+    dots = String.duplicate(".", max(2, @directory_width - String.length(label)))
+    "#{label} #{dots} #{number}"
+  end
+
+  defp klondike(name) do
+    "KL5-#{name |> :erlang.phash2(10_000) |> Integer.to_string() |> String.pad_leading(4, "0")}"
+  end
 
   defp mentions_me?(%{mentions: mentions}, participant_id),
     do: Enum.any?(mentions, &(&1.participant_id == participant_id))

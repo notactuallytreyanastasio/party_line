@@ -18,6 +18,11 @@ defmodule PartyLineWeb.RoomLiveTest do
     assert html =~ "party line"
     assert html =~ "dial in"
 
+    # the desktop behind the window is the exchange's phone book
+    assert html =~ "PARTY LINE TELEPHONE DIRECTORY"
+    assert html =~ "OPERATOR"
+    assert html =~ ~r/KL5-\d{4}|KL5-TIME/
+
     # dial in — lands lurking
     html = view |> element("form") |> render_submit(%{name: "Bobby"})
     assert html =~ "you&#39;re lurking"
