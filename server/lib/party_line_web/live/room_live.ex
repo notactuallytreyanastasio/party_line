@@ -112,25 +112,38 @@ defmodule PartyLineWeb.RoomLive do
   @impl true
   def render(%{stage: :dialing} = assigns) do
     ~H"""
-    <div class="min-h-screen flex items-center justify-center bg-base-200">
-      <div class="card bg-base-100 shadow-xl w-96">
-        <div class="card-body items-center text-center">
-          <h1 class="card-title text-3xl">☎ party line</h1>
-          <p class="text-sm opacity-70">
-            somewhere, a conversation is already happening. pick up the receiver.
+    <div class="retro-desktop">
+      <div class="retro-window" style="max-width: 460px;">
+        <div class="retro-titlebar">
+          <.link navigate={~p"/"} class="retro-close" aria-label="hang up, back to the exchange"></.link>
+          <span class="retro-titlebar-title">☎ party line — dialing</span>
+        </div>
+        <div class="retro-body" style="text-align: center;">
+          <p>
+            somewhere, a conversation is already happening.
+            pick up the receiver.
           </p>
-          <form phx-submit="dial" class="w-full mt-4 flex flex-col gap-3">
+          <p style="font-size:.85rem; opacity:.75;">
+            <em>exchange operator: who may I say is calling?</em>
+          </p>
+          <form phx-submit="dial" style="display:flex; flex-direction:column; gap:10px;">
             <input
               type="text"
               name="name"
               value={@name}
               placeholder="who's calling?"
               autocomplete="off"
-              class="input input-bordered w-full"
+              class="retro-input"
             />
-            <button type="submit" class="btn btn-primary w-full">dial in</button>
+            <button type="submit" class="retro-btn">dial in</button>
           </form>
-          <p :if={@error} class="text-error text-sm mt-2">{@error}</p>
+          <p :if={@error} style="color:#aa0000; font-size:.85rem; margin-top:.6rem;">
+            {@error}
+          </p>
+        </div>
+        <div class="retro-statusbar">
+          <span>the exchange</span>
+          <span>lines open</span>
         </div>
       </div>
     </div>
@@ -139,90 +152,89 @@ defmodule PartyLineWeb.RoomLive do
 
   def render(assigns) do
     ~H"""
-    <div class="h-screen flex flex-col bg-base-200">
-      <header class="navbar bg-base-100 shadow-sm px-4">
-        <div class="flex-1">
-          <span class="text-lg font-bold">☎ party line</span>
-          <span class="ml-3 text-sm opacity-70">
-            {@room_id} — tonight: <em>{@topic}</em>
+    <div class="retro-desktop">
+      <div class="retro-window retro-window--app">
+        <div class="retro-titlebar">
+          <.link navigate={~p"/"} class="retro-close" aria-label="hang up, back to the exchange"></.link>
+          <span class="retro-titlebar-title">
+            ☎ {@room_id} — tonight: {@topic}
           </span>
         </div>
-        <div :if={@lurking} class="flex items-center gap-2">
-          <span class="text-sm opacity-70">you're lurking — nobody can see you</span>
-          <button phx-click="announce" class="btn btn-primary btn-sm">clear your throat</button>
-        </div>
-      </header>
 
-      <div class="flex flex-1 overflow-hidden">
-        <main class="flex-1 flex flex-col">
-          <ul
-            id="messages"
-            phx-update="stream"
-            class="flex-1 overflow-y-auto p-4 space-y-2"
-            phx-hook=".ScrollToBottom"
-          >
-            <li :for={{dom_id, message} <- @streams.messages} id={dom_id} class="chat chat-start">
-              <div class="chat-header text-xs opacity-60">
-                {message.sender.name}
-                <span :if={message.sender.kind == :bot} class="badge badge-ghost badge-xs ml-1">
-                  bot
+        <div class="retro-app-main">
+          <div class="retro-chatcol">
+            <div :if={@lurking} class="retro-lurkbar">
+              <span>you're lurking — nobody can hear you breathe</span>
+              <button phx-click="announce" class="retro-btn">clear your throat</button>
+            </div>
+
+            <ul id="messages" phx-update="stream" class="retro-chatlog" phx-hook=".ScrollToBottom">
+              <li
+                :for={{dom_id, message} <- @streams.messages}
+                id={dom_id}
+                class={[
+                  "retro-chatline",
+                  mentions_me?(message, @participant_id) && "retro-chatline--me"
+                ]}
+              >
+                <span class={[
+                  "retro-chatname",
+                  message.sender.kind == :bot && "retro-chatname--bot"
+                ]}>
+                  {message.sender.name}
                 </span>
-              </div>
-              <div class={[
-                "chat-bubble",
-                message.sender.kind == :bot && "chat-bubble-neutral",
-                mentions_me?(message, @participant_id) && "ring-2 ring-primary"
-              ]}>
-                {highlight_mentions(message)}
-              </div>
-            </li>
-            <script :type={Phoenix.LiveView.ColocatedHook} name=".ScrollToBottom">
-              export default {
-                mounted() { this.el.scrollTop = this.el.scrollHeight },
-                updated() { this.el.scrollTop = this.el.scrollHeight }
-              }
-            </script>
-          </ul>
+                <span :if={message.sender.kind == :bot} class="retro-badge">bot</span>: {highlight_mentions(
+                  message
+                )}
+              </li>
+              <script :type={Phoenix.LiveView.ColocatedHook} name=".ScrollToBottom">
+                export default {
+                  mounted() { this.el.scrollTop = this.el.scrollHeight },
+                  updated() { this.el.scrollTop = this.el.scrollHeight }
+                }
+              </script>
+            </ul>
 
-          <form
-            id="speak-form"
-            phx-submit="speak"
-            phx-change="draft"
-            class="p-4 bg-base-100 flex gap-2"
-          >
-            <input
-              type="text"
-              name="body"
-              value={@draft}
-              placeholder={
-                if @lurking,
-                  do: "clear your throat to speak…",
-                  else: "say something (@name to address someone)"
-              }
-              disabled={@lurking}
-              autocomplete="off"
-              class="input input-bordered flex-1"
-            />
-            <button type="submit" class="btn btn-primary" disabled={@lurking}>send</button>
-          </form>
-        </main>
+            <form id="speak-form" phx-submit="speak" phx-change="draft" class="retro-inputrow">
+              <input
+                type="text"
+                name="body"
+                value={@draft}
+                placeholder={
+                  if @lurking,
+                    do: "clear your throat to speak…",
+                    else: "say something (@name to address someone)"
+                }
+                disabled={@lurking}
+                autocomplete="off"
+                class="retro-input"
+              />
+              <button type="submit" class="retro-btn" disabled={@lurking}>send</button>
+            </form>
+          </div>
 
-        <aside class="w-56 bg-base-100 border-l border-base-300 p-4 overflow-y-auto">
-          <h2 class="text-xs uppercase tracking-wide opacity-60 mb-3">on the line</h2>
-          <ul class="space-y-2">
-            <li :for={p <- @roster} class="flex items-center gap-2 text-sm">
-              <span class={[
-                "w-2 h-2 rounded-full",
-                (p.kind == :bot && "bg-success") || "bg-primary"
-              ]}></span>
-              {p.name}
-              <span :if={p.kind == :bot} class="badge badge-ghost badge-xs">bot</span>
-              <span :if={p.participant_id == @participant_id} class="opacity-50 text-xs">
-                (you)
-              </span>
-            </li>
-          </ul>
-        </aside>
+          <aside class="retro-roster">
+            <h2>on the line</h2>
+            <ul>
+              <li :for={p <- @roster}>
+                <span class={[
+                  "retro-dot",
+                  (p.kind == :bot && "retro-dot--bot") || "retro-dot--human"
+                ]}></span>
+                {p.name}
+                <span :if={p.kind == :bot} class="retro-badge">bot</span>
+                <span :if={p.participant_id == @participant_id} style="opacity:.6; font-size:.75rem;">
+                  (you)
+                </span>
+              </li>
+            </ul>
+          </aside>
+        </div>
+
+        <div class="retro-statusbar">
+          <span>connected · {@room_id}</span>
+          <span>{length(@roster)} on the line</span>
+        </div>
       </div>
     </div>
     """
@@ -248,7 +260,7 @@ defmodule PartyLineWeb.RoomLive do
     |> Enum.map(fn part ->
       if MapSet.member?(highlighted, String.downcase(part)) do
         Phoenix.HTML.raw([
-          "<span class=\"font-semibold text-primary\">",
+          "<span class=\"retro-mention\">",
           Phoenix.HTML.html_escape(part) |> Phoenix.HTML.safe_to_string(),
           "</span>"
         ])

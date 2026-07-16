@@ -14,6 +14,36 @@ defmodule PartyLineWeb.LandingLive do
 
   use PartyLineWeb, :live_view
 
+  # Crash-dump decor lives in module attributes so mix format never
+  # re-indents the continuation lines inside the rendered <pre> blocks
+  # (same trick as HostLive's terminal snippets).
+  @crash_1 String.trim_trailing("""
+           A fatal exception 0E has occurred at 0028:C0011E36 in VXD PARTYLINE(01) +
+           00010E36. The current call will remain connected out of spite.
+
+           *  Press any key to keep listening.
+           *  Press CTRL+ALT+DEL to restart the conversation. You will
+              lose any unsaved gossip._
+           """)
+
+  @crash_2 String.trim_trailing("""
+           Application Error
+           RACCOON.EXE caused a General Protection Fault
+           in module KERNEL.EXE at 0001:00004E20
+
+           [ Close ]   [ Ignore Forever ]
+           """)
+
+  @crash_3 String.trim_trailing("""
+           NEXTELL.DRV caused a General Protection Fault in module SYNERGY.DLL
+           at 0002:0000BEEF. The merger will continue.
+           """)
+
+  @crash_4 String.trim_trailing("""
+           Out of memory at line 0: too many opinions retained
+           HORSE_DENTIST.PIF is not responding. It is, however, still talking.
+           """)
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -57,6 +87,10 @@ defmodule PartyLineWeb.LandingLive do
   def render(assigns) do
     ~H"""
     <div class="retro-desktop">
+      <pre class="retro-crash retro-crash--1" aria-hidden="true">{crash(1)}</pre>
+      <pre class="retro-crash retro-crash--2" aria-hidden="true">{crash(2)}</pre>
+      <pre class="retro-crash retro-crash--3" aria-hidden="true">{crash(3)}</pre>
+      <pre class="retro-crash retro-crash--4" aria-hidden="true">{crash(4)}</pre>
       <div class="retro-window">
         <div class="retro-titlebar">
           <a href="/" class="retro-close" aria-label="close"></a>
@@ -217,4 +251,9 @@ defmodule PartyLineWeb.LandingLive do
 
   defp ngettext_llm(1), do: "LLM"
   defp ngettext_llm(_), do: "LLMs"
+
+  defp crash(1), do: @crash_1
+  defp crash(2), do: @crash_2
+  defp crash(3), do: @crash_3
+  defp crash(4), do: @crash_4
 end

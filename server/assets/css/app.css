@@ -400,3 +400,77 @@
   box-shadow: inset -1px -1px 0 #404040, inset 1px 1px 0 #fff, 4px 4px 0 rgba(0,0,0,.45);
 }
 .retro-dialog .retro-body { text-align: center; }
+
+/* system error desktop: the exchange runs on faith */
+.retro-desktop {
+  background-color: #0b18e0;
+  background-image: repeating-conic-gradient(#0a15cd 0% 25%, #0b18e0 0% 50%);
+  position: relative;
+}
+.retro-desktop > .retro-window, .retro-desktop > .retro-taskbar,
+.retro-desktop > .retro-start-menu, .retro-desktop > .retro-dialog-overlay {
+  position: relative; z-index: 2;
+}
+.retro-taskbar, .retro-start-menu, .retro-dialog-overlay { z-index: 40 !important; }
+.retro-crash {
+  position: absolute; z-index: 1; pointer-events: none; user-select: none;
+  color: #b7bcc8; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.72rem; line-height: 1.5; white-space: pre; margin: 0;
+  background: none; border: none; box-shadow: none; padding: 0; overflow: hidden;
+}
+.retro-crash--1 { top: 4%; left: 3%; transform: rotate(-1deg); }
+.retro-crash--2 { top: 8%; right: 4%; text-align: right; transform: rotate(0.5deg); }
+.retro-crash--3 { bottom: 64px; left: 5%; }
+.retro-crash--4 { bottom: 72px; right: 6%; text-align: right; transform: rotate(-0.6deg); }
+@media (max-width: 900px) { .retro-crash { display: none; } }
+
+/* the line itself: chat as a windoze app */
+.retro-window--app {
+  width: min(1040px, 96vw); height: calc(100vh - 110px);
+  display: flex; flex-direction: column; margin-top: 10px;
+}
+.retro-window--app .retro-app-main { flex: 1; display: flex; min-height: 0; background: #c0c0c0; padding: 8px; gap: 8px; }
+.retro-chatcol { flex: 1; display: flex; flex-direction: column; min-width: 0; gap: 8px; }
+.retro-chatlog {
+  flex: 1; overflow-y: auto; background: #fff; padding: 10px 12px; margin: 0;
+  list-style: none; font-size: .92rem; line-height: 1.55;
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #fff,
+              inset 2px 2px 0 #808080, inset -2px -2px 0 #dfdfdf;
+}
+.retro-chatline { padding: 2px 4px; }
+.retro-chatline--me { background: #ffffe1; outline: 1px dotted #808080; }
+.retro-chatname { font-weight: 700; }
+.retro-chatname--bot { color: #000080; }
+.retro-badge {
+  font-size: .62rem; border: 1px solid #808080; padding: 0 4px; margin-left: 4px;
+  background: #dfdfdf; vertical-align: middle; letter-spacing: .04em;
+}
+.retro-mention { background: #000080; color: #fff; padding: 0 3px; }
+.retro-inputrow { display: flex; gap: 8px; }
+.retro-input {
+  flex: 1; background: #fff; border: none; padding: 8px 10px; font: inherit;
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #fff,
+              inset 2px 2px 0 #808080, inset -2px -2px 0 #dfdfdf;
+}
+.retro-input:disabled { background: #c0c0c0; color: #808080; }
+.retro-input:focus-visible { outline: 1px dotted #000; outline-offset: -5px; }
+.retro-roster {
+  width: 210px; flex: none; background: #fff; padding: 8px 10px; overflow-y: auto;
+  font-size: .85rem;
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #fff,
+              inset 2px 2px 0 #808080, inset -2px -2px 0 #dfdfdf;
+}
+.retro-roster h2 {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .1em;
+  color: #808080; margin: 0 0 8px; border-top: none; padding-top: 0;
+}
+.retro-roster li { display: flex; align-items: center; gap: 6px; margin: 5px 0; list-style: none; }
+.retro-roster ul { padding: 0; margin: 0; }
+.retro-dot { width: 9px; height: 9px; flex: none; border: 1px solid #000; }
+.retro-dot--bot { background: #00a800; }
+.retro-dot--human { background: #ff8800; }
+.retro-lurkbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: #ffffe1; border: 1px solid #808080; padding: 6px 10px; font-size: .85rem;
+}
+@media (max-width: 700px) { .retro-roster { display: none; } }

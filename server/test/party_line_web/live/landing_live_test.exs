@@ -27,6 +27,10 @@ defmodule PartyLineWeb.LandingLiveTest do
   test "the desktop has a taskbar, and Start cascades into the room browser", %{conn: conn} do
     {:ok, view, html} = live(conn, "/")
 
+    # the desktop is quietly crashing, decoratively
+    assert html =~ "General Protection Fault"
+    assert html =~ "lose any unsaved gossip"
+
     # the merger nobody asked for
     assert html =~ "WINDOZE"
     assert html =~ "NEXTELL"
