@@ -731,3 +731,15 @@ html[data-pl-theme="modern"] {
     box-shadow: 0 16px 48px rgba(0,0,0,.18);
   }
 }
+
+/* sign in with bluesky */
+.retro-signin {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 16px; padding: 10px 12px; background: #eef2ff;
+  border: 1px solid #808080; font-size: .85rem;
+}
+.retro-signin-label { font-weight: 700; }
+.retro-signin-input { flex: 1; min-width: 150px; padding: 6px 8px; }
+html[data-pl-theme="modern"] .retro-signin {
+  background: #f2faf8; border: 1px solid #ececf1; border-radius: 10px;
+}

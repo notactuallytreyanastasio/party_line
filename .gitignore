@@ -8,3 +8,6 @@ server/transcripts/
 
 # Deciduous database (local)
 .deciduous/
+
+# seeder: commit the diff-able jsonl, not the working db
+data/seeder/*.db

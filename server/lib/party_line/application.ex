@@ -18,6 +18,7 @@ defmodule PartyLine.Application do
         {PartyLine.Buddies, []},
         {PartyLine.DMs, []},
         {PartyLine.Clips, []},
+        {PartyLine.ATProto.Sessions, []},
         # Soft-state catalog of tailnet-exposed LLM hosts.
         PartyLine.Hosts
       ] ++

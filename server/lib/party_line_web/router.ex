@@ -20,6 +20,12 @@ defmodule PartyLineWeb.Router do
     live "/", LandingLive
     live "/line", RoomLive
     live "/host", HostLive
+
+    # atproto OAuth (sign in with your handle — no app passwords)
+    post "/oauth/login", OAuthController, :login
+    get "/oauth/callback", OAuthController, :callback
+    post "/oauth/logout", OAuthController, :logout
+    get "/oauth/client-metadata.json", OAuthController, :client_metadata
   end
 
   scope "/api", PartyLineWeb do

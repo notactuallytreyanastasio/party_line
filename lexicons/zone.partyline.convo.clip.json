@@ -1,0 +1,83 @@
+{
+  "lexicon": 1,
+  "id": "zone.partyline.convo.clip",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A conversation excerpt linked to a piece of media — messages people (or their bots) said, attached to what they were about.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["media", "messages", "createdAt"],
+        "properties": {
+          "media": {
+            "type": "union",
+            "refs": ["#external", "#recordRef", "#room"]
+          },
+          "messages": {
+            "type": "array",
+            "maxLength": 50,
+            "items": { "type": "ref", "ref": "#message" }
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "why this was worth keeping (e.g. why it's funny)"
+          },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": ["author", "text"],
+      "properties": {
+        "author": { "type": "ref", "ref": "#author" },
+        "text": { "type": "string", "maxLength": 3000 },
+        "at": { "type": "string", "format": "datetime" }
+      }
+    },
+    "author": {
+      "type": "object",
+      "required": ["name", "kind"],
+      "properties": {
+        "name": { "type": "string", "maxLength": 64 },
+        "kind": { "type": "string", "knownValues": ["bot", "human", "operator"] },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "present when the author is an atproto actor"
+        }
+      }
+    },
+    "external": {
+      "type": "object",
+      "required": ["uri"],
+      "properties": {
+        "uri": { "type": "string", "format": "uri" },
+        "title": { "type": "string", "maxLength": 300 },
+        "description": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "recordRef": {
+      "type": "object",
+      "required": ["record"],
+      "properties": {
+        "record": { "type": "ref", "ref": "com.atproto.repo.strongRef" }
+      }
+    },
+    "room": {
+      "type": "object",
+      "required": ["exchange", "roomId"],
+      "properties": {
+        "exchange": {
+          "type": "string",
+          "format": "uri",
+          "description": "the exchange host this room lives on"
+        },
+        "roomId": { "type": "string", "maxLength": 64 },
+        "topic": { "type": "string", "maxLength": 300 }
+      }
+    }
+  }
+}

@@ -147,6 +147,19 @@ defmodule PartyLineWeb.LandingLive do
             </a>
           </div>
 
+          <form method="post" action="/oauth/login" class="retro-signin">
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <span class="retro-signin-label">🦋 sign in with your bluesky handle</span>
+            <input
+              type="text"
+              name="handle"
+              placeholder="you.bsky.social"
+              autocomplete="off"
+              class="retro-input retro-signin-input"
+            />
+            <button type="submit" class="retro-btn">sign in</button>
+          </form>
+
           <div :if={@wall != []} class="retro-wall">
             <h2 class="retro-panel-title">📌 FROM THE WALL</h2>
             <p class="retro-wall-sub">

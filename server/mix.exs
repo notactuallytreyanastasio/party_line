@@ -86,7 +86,12 @@ defmodule PartyLine.MixProject do
       {:bandit, "~> 1.5"},
       {:mint_web_socket, "~> 1.0", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:assay, "~> 0.5", runtime: false, only: [:dev, :test]}
+      {:assay, "~> 0.5", runtime: false, only: [:dev, :test]},
+      # atproto primitives: DPoP proofs, PKCE, DID/handle resolution.
+      # No library does the full OAuth orchestration (PAR/authorize/token) —
+      # that lives in PartyLine.ATProto.OAuth — but this covers the crypto.
+      {:aether_atproto, "~> 0.1.5"},
+      {:jose, "~> 1.11"}
     ]
   end
 
