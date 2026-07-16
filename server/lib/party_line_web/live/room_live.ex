@@ -1,10 +1,13 @@
 defmodule PartyLineWeb.RoomLive do
   @moduledoc """
-  The human client. Dial in with a name, land in the room **lurking** —
-  you see the conversation already in progress but the room doesn't know
-  you're there — then clear your throat to join. The LiveView process is
-  itself the room participant: it joins the Room GenServer directly and
-  receives the same `{:party_line, event}` stream the bot sockets do.
+  The human client — the switchboard view. Dial in with a name and you're
+  patched into EVERY live line at once (min 2, max 4 windows tiled on the
+  desktop), lurking in all of them: you see each conversation already in
+  progress, but no room knows you're there. Clear your throat in a window
+  to join that line; the others keep streaming. The LiveView process is
+  itself the participant in every room — it joins each Room GenServer
+  directly and receives the same `{:party_line, event}` stream bot sockets
+  do, routed per-window by the event's `room_id`.
   """
 
   use PartyLineWeb, :live_view
@@ -12,16 +15,23 @@ defmodule PartyLineWeb.RoomLive do
   alias PartyLine.Rooms
   alias PartyLine.Rooms.Room
 
+  @max_windows 4
+  # streams need static names; windows are indexed into these
+  @streams [:messages_0, :messages_1, :messages_2, :messages_3]
+
   @impl true
   def mount(_params, _session, socket) do
+    socket =
+      Enum.reduce(@streams, socket, fn name, sock ->
+        sock
+        |> stream_configure(name, dom_id: &"#{name}-#{&1.message_id}")
+        |> stream(name, [])
+      end)
+
     {:ok,
      socket
      |> assign(page_title: "Party Line", stage: :dialing, name: "", error: nil)
-     |> assign(room: nil, room_id: nil, topic: nil, participant_id: nil)
-     |> assign(roster: [], lurking: true, draft: "")
-     |> assign(directory: directory_text())
-     |> stream_configure(:messages, dom_id: &"msg-#{&1.message_id}")
-     |> stream(:messages, [])}
+     |> assign(windows: [], directory: directory_text())}
   end
 
   @impl true
@@ -36,77 +46,127 @@ defmodule PartyLineWeb.RoomLive do
         {:noreply, socket}
 
       true ->
-        %{room_id: room_id} = Rooms.dial()
-        {:ok, room} = Rooms.whereis(room_id)
-
-        case Room.join(room, %{name: name, kind: :human, lurk: true, pid: self()}) do
-          {:ok, welcome} ->
-            {:noreply,
-             socket
-             |> assign(
-               stage: :in_room,
-               name: name,
-               error: nil,
-               room: room,
-               room_id: room_id,
-               topic: welcome.room.topic,
-               participant_id: welcome.participant_id,
-               roster: welcome.roster,
-               lurking: true
-             )
-             |> stream(:messages, welcome.transcript, reset: true)}
-
-          {:error, reason} ->
-            {:noreply, assign(socket, error: "couldn't join: #{inspect(reason)}")}
-        end
+        open_switchboard(socket, name)
     end
   end
 
-  def handle_event("announce", _params, socket) do
-    :ok = Room.announce(socket.assigns.room, socket.assigns.participant_id)
-    {:noreply, assign(socket, lurking: false)}
+  def handle_event("announce", %{"room" => room_id}, socket) do
+    with %{} = window <- window_for(socket, room_id) do
+      :ok = Room.announce(window.room, window.participant_id)
+    end
+
+    {:noreply, update_window(socket, room_id, &%{&1 | lurking: false})}
   end
 
-  def handle_event("draft", %{"body" => body}, socket) do
-    {:noreply, assign(socket, draft: body)}
+  def handle_event("draft", %{"room" => room_id, "body" => body}, socket) do
+    {:noreply, update_window(socket, room_id, &%{&1 | draft: body})}
   end
 
-  def handle_event("speak", %{"body" => body}, socket) do
+  def handle_event("speak", %{"room" => room_id, "body" => body}, socket) do
     body = String.trim(body)
 
-    if body != "" and not socket.assigns.lurking do
-      Room.speak(socket.assigns.room, socket.assigns.participant_id, nil, body)
+    with %{lurking: false} = window <- window_for(socket, room_id) do
+      if body != "", do: Room.speak(window.room, window.participant_id, nil, body)
     end
 
-    {:noreply, assign(socket, draft: "")}
+    {:noreply, update_window(socket, room_id, &%{&1 | draft: ""})}
   end
 
   @impl true
-  def handle_info({:party_line, %{type: :message} = message}, socket) do
-    {:noreply, stream_insert(socket, :messages, message)}
+  def handle_info({:party_line, %{type: :message, room_id: room_id} = message}, socket) do
+    case window_for(socket, room_id) do
+      nil -> {:noreply, socket}
+      window -> {:noreply, stream_insert(socket, stream_name(window.index), message)}
+    end
   end
 
-  def handle_info({:party_line, %{type: :presence} = presence}, socket) do
+  def handle_info({:party_line, %{type: :presence, room_id: room_id} = presence}, socket) do
     %{event: event, participant: participant} = presence
 
-    roster =
-      case event do
-        :left ->
-          Enum.reject(socket.assigns.roster, &(&1.participant_id == participant.participant_id))
+    {:noreply,
+     update_window(socket, room_id, fn window ->
+       roster =
+         case event do
+           :left ->
+             Enum.reject(window.roster, &(&1.participant_id == participant.participant_id))
 
-        _joined_or_announced ->
-          if Enum.any?(socket.assigns.roster, &(&1.participant_id == participant.participant_id)) do
-            socket.assigns.roster
-          else
-            socket.assigns.roster ++ [participant]
-          end
-      end
+           _joined_or_announced ->
+             if Enum.any?(window.roster, &(&1.participant_id == participant.participant_id)) do
+               window.roster
+             else
+               window.roster ++ [participant]
+             end
+         end
 
-    {:noreply, assign(socket, roster: roster)}
+       %{window | roster: roster}
+     end)}
   end
 
-  # humans don't bid; ignore director traffic defensively
+  # humans don't bid; ignore director traffic (and legacy un-routed events)
   def handle_info({:party_line, _event}, socket), do: {:noreply, socket}
+
+  # ── Window bookkeeping ───────────────────────────────────────────────────
+
+  defp open_switchboard(socket, name) do
+    :ok = Rooms.ensure_lines()
+
+    windows =
+      Rooms.switchboard_rooms()
+      |> Enum.take(@max_windows)
+      |> Enum.with_index()
+      |> Enum.map(fn {%{id: room_id}, index} -> join_line(socket, name, room_id, index) end)
+      |> Enum.reject(&is_nil/1)
+
+    case windows do
+      [] ->
+        {:noreply, assign(socket, error: "no lines are answering. odd. try again.")}
+
+      windows ->
+        socket =
+          Enum.reduce(windows, socket, fn w, sock ->
+            stream(sock, stream_name(w.index), w.transcript, reset: true)
+          end)
+
+        {:noreply,
+         socket
+         |> assign(stage: :in_room, name: name, error: nil)
+         |> assign(windows: Enum.map(windows, &Map.delete(&1, :transcript)))}
+    end
+  end
+
+  defp join_line(_socket, name, room_id, index) do
+    with {:ok, room} <- Rooms.whereis(room_id),
+         {:ok, welcome} <- Room.join(room, %{name: name, kind: :human, lurk: true, pid: self()}) do
+      %{
+        index: index,
+        room_id: room_id,
+        room: room,
+        topic: welcome.room.topic,
+        participant_id: welcome.participant_id,
+        roster: welcome.roster,
+        lurking: true,
+        draft: "",
+        transcript: welcome.transcript
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp stream_name(index), do: Enum.at(@streams, index)
+
+  defp window_for(socket, room_id),
+    do: Enum.find(socket.assigns.windows, &(&1.room_id == room_id))
+
+  defp update_window(socket, room_id, fun) do
+    windows =
+      Enum.map(socket.assigns.windows, fn
+        %{room_id: ^room_id} = window -> fun.(window)
+        window -> window
+      end)
+
+    assign(socket, windows: windows)
+  end
 
   # ── Render ───────────────────────────────────────────────────────────────
 
@@ -123,8 +183,8 @@ defmodule PartyLineWeb.RoomLive do
         </div>
         <div class="retro-body" style="text-align: center;">
           <p>
-            somewhere, a conversation is already happening.
-            pick up the receiver.
+            somewhere, several conversations are already happening.
+            pick up the receiver and hear them all.
           </p>
           <p style="font-size:.85rem; opacity:.75;">
             <em>exchange operator: who may I say is calling?</em>
@@ -155,93 +215,85 @@ defmodule PartyLineWeb.RoomLive do
 
   def render(assigns) do
     ~H"""
-    <div class="retro-desktop">
+    <div class="retro-desktop retro-desktop--switchboard">
       <pre class="retro-crash retro-directory" aria-hidden="true">{@directory}</pre>
-      <pre class="retro-crash retro-directory retro-directory--right" aria-hidden="true">{@directory}</pre>
-      <div class="retro-window retro-window--app">
-        <div class="retro-titlebar">
-          <.link navigate={~p"/"} class="retro-close" aria-label="hang up, back to the exchange"></.link>
-          <span class="retro-titlebar-title">
-            ☎ {@room_id} — tonight: {@topic}
-          </span>
-        </div>
+      <div class={["retro-multigrid", "retro-multigrid--#{length(@windows)}"]}>
+        <div :for={window <- @windows} class="retro-window retro-window--pane">
+          <div class="retro-titlebar">
+            <.link navigate={~p"/"} class="retro-close" aria-label="hang up, back to the exchange"></.link>
+            <span class="retro-titlebar-title">
+              ☎ {window.room_id} — {window.topic}
+            </span>
+          </div>
 
-        <div class="retro-app-main">
-          <div class="retro-chatcol">
-            <div :if={@lurking} class="retro-lurkbar">
+          <div class="retro-pane-main">
+            <div :if={window.lurking} class="retro-lurkbar">
               <span>you're lurking — nobody can hear you breathe</span>
-              <button phx-click="announce" class="retro-btn">clear your throat</button>
+              <button phx-click="announce" phx-value-room={window.room_id} class="retro-btn">
+                clear your throat
+              </button>
             </div>
 
-            <ul id="messages" phx-update="stream" class="retro-chatlog" phx-hook=".ScrollToBottom">
+            <ul
+              id={"messages-#{window.index}"}
+              phx-update="stream"
+              class="retro-chatlog"
+              phx-hook=".ScrollToBottom"
+            >
               <li
-                :for={{dom_id, message} <- @streams.messages}
+                :for={{dom_id, message} <- @streams[stream_name(window.index)]}
                 id={dom_id}
                 class={[
                   "retro-chatline",
                   message.sender.kind == :operator && "retro-chatline--operator",
                   message.sender.kind != :operator &&
-                    mentions_me?(message, @participant_id) && "retro-chatline--me"
+                    mentions_me?(message, window.participant_id) && "retro-chatline--me"
                 ]}
               >
                 <.chat_line message={message} />
               </li>
-              <script :type={Phoenix.LiveView.ColocatedHook} name=".ScrollToBottom">
-                export default {
-                  mounted() { this.el.scrollTop = this.el.scrollHeight },
-                  updated() { this.el.scrollTop = this.el.scrollHeight }
-                }
-              </script>
             </ul>
 
-            <form id="speak-form" phx-submit="speak" phx-change="draft" class="retro-inputrow">
+            <form
+              id={"speak-form-#{window.index}"}
+              phx-submit="speak"
+              phx-change="draft"
+              class="retro-inputrow"
+            >
+              <input type="hidden" name="room" value={window.room_id} />
               <input
                 type="text"
                 name="body"
-                value={@draft}
+                value={window.draft}
                 placeholder={
-                  if @lurking,
+                  if window.lurking,
                     do: "clear your throat to speak…",
                     else: "say something (@name to address someone)"
                 }
-                disabled={@lurking}
+                disabled={window.lurking}
                 autocomplete="off"
                 class="retro-input"
               />
-              <button type="submit" class="retro-btn" disabled={@lurking}>send</button>
+              <button type="submit" class="retro-btn" disabled={window.lurking}>send</button>
             </form>
           </div>
 
-          <aside class="retro-roster">
-            <h2>on the line</h2>
-            <ul>
-              <li :for={p <- @roster}>
-                <span class={["retro-dot", dot_class(p.kind)]}></span>
-                {p.name}
-                <span :if={p.kind == :bot} class="retro-badge">bot</span>
-                <span :if={p.kind == :operator} class="retro-badge">host</span>
-                <span :if={p.participant_id == @participant_id} style="opacity:.6; font-size:.75rem;">
-                  (you)
-                </span>
-              </li>
-            </ul>
-          </aside>
-        </div>
-
-        <div class="retro-statusbar">
-          <span>connected · {@room_id}{hosted_suffix(@roster)}</span>
-          <span>{length(@roster)} on the line</span>
+          <div class="retro-statusbar">
+            <span>{window.room_id}{hosted_suffix(window.roster)}</span>
+            <span>{length(window.roster)} on the line</span>
+          </div>
         </div>
       </div>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".ScrollToBottom">
+        export default {
+          mounted() { this.el.scrollTop = this.el.scrollHeight },
+          updated() { this.el.scrollTop = this.el.scrollHeight }
+        }
+      </script>
     </div>
     """
   end
 
-  # ── Helpers ──────────────────────────────────────────────────────────────
-
-  # The operator is the voice of the exchange: a host line, not a speaker.
-  # It renders centered and name-less; every other kind keeps the Name: body
-  # form. Mentions stay highlighted in both.
   defp chat_line(%{message: %{sender: %{kind: :operator}}} = assigns) do
     ~H"""
     <span class="retro-operator-line">{highlight_mentions(@message)}</span>
@@ -250,7 +302,10 @@ defmodule PartyLineWeb.RoomLive do
 
   defp chat_line(assigns) do
     ~H"""
-    <span class={["retro-chatname", @message.sender.kind == :bot && "retro-chatname--bot"]}>
+    <span class={[
+      "retro-chatname",
+      @message.sender.kind == :bot && "retro-chatname--bot"
+    ]}>
       {@message.sender.name}
     </span>
     <span :if={@message.sender.kind == :bot} class="retro-badge">bot</span>: {highlight_mentions(
@@ -259,15 +314,13 @@ defmodule PartyLineWeb.RoomLive do
     """
   end
 
-  defp dot_class(:bot), do: "retro-dot--bot"
-  defp dot_class(:operator), do: "retro-dot--operator"
-  defp dot_class(_), do: "retro-dot--human"
-
   defp hosted_suffix(roster) do
-    if Enum.any?(roster, &(&1.kind == :operator)), do: " · hosted line", else: ""
+    if Enum.any?(roster, &(&1.kind == :operator)), do: " · hosted", else: ""
   end
 
-  # The desktop behind the window is a page torn from the exchange's phone
+  # ── Helpers ──────────────────────────────────────────────────────────────
+
+  # The desktop behind the windows is a page torn from the exchange's phone
   # book: every bot currently on the line, set grey on the blue, KLondike-5
   # numbers derived from their names. Built as a string so neither HEEx nor
   # mix format can re-flow the dot leaders.

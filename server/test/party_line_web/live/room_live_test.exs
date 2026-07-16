@@ -32,14 +32,21 @@ defmodule PartyLineWeb.RoomLiveTest do
     {:ok, room} = Rooms.whereis("room-default")
     refute Enum.any?(Room.snapshot(room).roster, &(&1.name == "Bobby"))
 
-    # announce
-    html = view |> element("button", "clear your throat") |> render_click()
-    refute html =~ "clear your throat"
+    # announce — in the room-default window specifically (other lines may exist)
+    view
+    |> element(~s{[phx-value-room="room-default"]}, "clear your throat")
+    |> render_click()
+
     assert Enum.any?(Room.snapshot(room).roster, &(&1.name == "Bobby"))
 
     # speak — the message comes back over the room broadcast and renders
-    view |> element("form[phx-submit=speak]") |> render_submit(%{body: "hello everyone"})
-    assert render_async(view) =~ "hello everyone"
+    view
+    |> element("#speak-form-#{window_index(view, "room-default")}")
+    |> render_submit(%{body: "hello everyone"})
+
+    # snapshot serializes behind the speak cast; render behind the broadcast
+    _ = Room.snapshot(room)
+    assert render(view) =~ "hello everyone"
   end
 
   test "messages from others render with sender name", %{conn: conn} do
@@ -58,6 +65,57 @@ defmodule PartyLineWeb.RoomLiveTest do
     assert html =~ "psst"
   end
 
+  test "the switchboard opens a window per live line", %{conn: conn} do
+    previous = Application.get_env(:party_line, :lines, [])
+
+    Application.put_env(:party_line, :lines, [
+      {"room-switch-a", "topic alpha"},
+      {"room-switch-b", "topic beta"}
+    ])
+
+    on_exit(fn -> Application.put_env(:party_line, :lines, previous) end)
+
+    {:ok, view, _html} = live(conn, "/line")
+    html = view |> element("form") |> render_submit(%{name: "Plugger"})
+
+    # one window per room, each with its own titlebar and speak form
+    assert html =~ "room-switch-a"
+    assert html =~ "topic alpha"
+    assert html =~ "room-switch-b"
+    assert html =~ "topic beta"
+    assert html =~ "speak-form-0"
+    assert html =~ "speak-form-1"
+
+    # announcing in ONE window leaves the others lurking
+    view
+    |> element(~s{[phx-value-room="room-switch-a"]}, "clear your throat")
+    |> render_click()
+
+    {:ok, room_a} = Rooms.whereis("room-switch-a")
+    {:ok, room_b} = Rooms.whereis("room-switch-b")
+    assert Enum.any?(Room.snapshot(room_a).roster, &(&1.name == "Plugger"))
+    refute Enum.any?(Room.snapshot(room_b).roster, &(&1.name == "Plugger"))
+
+    # speaking targets only the announced room
+    view
+    |> element(~s{#speak-form-#{window_index(view, "room-switch-a")}})
+    |> render_submit(%{body: "hello line a"})
+
+    Process.sleep(50)
+    assert Enum.any?(Room.snapshot(room_a).transcript, &(&1.body == "hello line a"))
+    refute Enum.any?(Room.snapshot(room_b).transcript, &(&1.body == "hello line a"))
+  end
+
+  # find which window index a room landed in (window order = list_rooms order)
+  defp window_index(view, room_id) do
+    html = render(view)
+
+    Regex.scan(~r/☎ (room-[a-z0-9-]+)/, html)
+    |> Enum.map(fn [_, id] -> id end)
+    |> Enum.uniq()
+    |> Enum.find_index(&(&1 == room_id))
+  end
+
   test "operator messages render as a host voice, not a speaker line", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/line")
     view |> element("form") |> render_submit(%{name: "Watcher"})
@@ -69,6 +127,7 @@ defmodule PartyLineWeb.RoomLiveTest do
       {:party_line,
        %{
          type: :message,
+         room_id: "room-default",
          seq: 999,
          message_id: "m-999",
          ts: "1996-01-01T00:00:00Z",

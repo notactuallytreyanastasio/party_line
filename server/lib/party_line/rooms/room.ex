@@ -523,6 +523,7 @@ defmodule PartyLine.Rooms.Room do
 
     message = %{
       type: :message,
+      room_id: state.id,
       seq: seq,
       message_id: "m-#{seq}",
       ts: DateTime.to_iso8601(DateTime.utc_now()),
@@ -711,6 +712,7 @@ defmodule PartyLine.Rooms.Room do
       state,
       %{
         type: :presence,
+        room_id: state.id,
         event: event,
         participant: %{participant_id: p.id, name: p.name, kind: p.kind}
       },

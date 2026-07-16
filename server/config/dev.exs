@@ -82,3 +82,10 @@ if File.exists?(token_path) do
     token: token_path |> File.read!() |> String.trim(),
     root_graph: "party-line-root"
 end
+
+# the exchange's programmed lines (the switchboard view joins all of them)
+config :party_line, :lines, [
+  {"room-default", "whether cities are accidentally breeding smarter raccoons"},
+  {"room-supper-club", "street food worth fighting a seagull for"},
+  {"room-observatory", "what's actually up there tonight, no equipment required"}
+]

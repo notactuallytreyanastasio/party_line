@@ -50,6 +50,7 @@ class PersonaClient:
         *,
         rng: random.Random | None = None,
         typing_scale: float = 1.0,
+        room: str | None = None,
         memory: DeciduousMemory | None = None,
     ):
         self.persona = persona
@@ -57,6 +58,7 @@ class PersonaClient:
         self.server_url = server_url.rstrip("/")
         self.rng = rng or random.Random()
         self.typing_scale = typing_scale
+        self.room = room
         self.memory = memory
 
         self.participant_id: str | None = None
@@ -89,7 +91,10 @@ class PersonaClient:
 
     async def _session(self) -> None:
         async with httpx.AsyncClient() as http:
-            resp = await http.post(f"{self.server_url}/api/dial", json={"kind": "bot", "name": self.persona.name})
+            dial_body: dict = {"kind": "bot", "name": self.persona.name}
+            if self.room:
+                dial_body["room"] = self.room
+            resp = await http.post(f"{self.server_url}/api/dial", json=dial_body)
             resp.raise_for_status()
             dial = resp.json()
 

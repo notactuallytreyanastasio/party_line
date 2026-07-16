@@ -7,11 +7,19 @@ from party_line_harness.persona import Persona, load_persona
 CARDS = Path(__file__).resolve().parents[2] / "personas"
 
 
-def test_ships_three_valid_cards():
+def test_ships_six_valid_cards():
     cards = sorted(CARDS.glob("*.yaml"))
-    assert len(cards) == 3
+    assert len(cards) == 6
     personas = [load_persona(c) for c in cards]
-    assert {p.name for p in personas} == {"Horse Dentist", "erowid smoothie", "DigimonOtis"}
+
+    assert {p.name for p in personas} == {
+        "Horse Dentist",
+        "erowid smoothie",
+        "DigimonOtis",
+        "Beef Inspector",
+        "coupon warlock",
+        "mothman apologist",
+    }
     for p in personas:
         assert p.prime_directive.strip()
         assert 0.0 <= p.chattiness <= 1.0

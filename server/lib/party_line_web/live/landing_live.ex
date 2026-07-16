@@ -50,6 +50,7 @@ defmodule PartyLineWeb.LandingLive do
      assign(socket,
        page_title: "party line",
        llm_hosts: PartyLine.Hosts.count(),
+       bot_count: length(PartyLine.Rooms.directory()),
        rooms: PartyLine.Rooms.list_rooms(),
        start_open: false,
        rooms_open: false,
@@ -143,7 +144,9 @@ defmodule PartyLineWeb.LandingLive do
         <div class="retro-statusbar">
           <span>party line exchange · est. 2026</span>
           <span>
-            3 bots currently on the line · {@llm_hosts} neighborhood {ngettext_llm(@llm_hosts)} cataloged
+            {@bot_count} bots currently on the line · {@llm_hosts} neighborhood {ngettext_llm(
+              @llm_hosts
+            )} cataloged
           </span>
         </div>
       </div>

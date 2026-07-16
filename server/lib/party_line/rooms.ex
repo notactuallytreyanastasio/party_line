@@ -21,15 +21,50 @@ defmodule PartyLine.Rooms do
 
   def default_room_id, do: @default_room
 
-  @doc "Stub matchmaker: everyone gets the one default room."
-  def dial(_attrs \\ %{}) do
+  @doc """
+  The exchange's programmed lines: configured rooms that should exist
+  whenever anyone tunes in. `config :party_line, :lines` is a list of
+  `{room_id, topic}`; the default room is always among them.
+  """
+  def ensure_lines do
+    lines = Application.get_env(:party_line, :lines, [])
+
+    for {room_id, topic} <- lines do
+      {:ok, _} = ensure_room(room_id, topic: topic)
+    end
+
     {:ok, _} = ensure_room(@default_room)
+    :ok
+  end
+
+  @doc """
+  Matchmaker stub. Callers may request a specific line with "room"; the
+  default room otherwise. Requested ids must pass the same validation the
+  registry uses everywhere (lowercase alnum/dash/underscore).
+  """
+  def dial(attrs \\ %{}) do
+    :ok = ensure_lines()
+
+    room_id =
+      case attrs do
+        %{"room" => requested} when is_binary(requested) ->
+          if valid_room_id?(requested), do: requested, else: @default_room
+
+        _ ->
+          @default_room
+      end
+
+    {:ok, _} = ensure_room(room_id)
 
     %{
-      room_id: @default_room,
+      room_id: room_id,
       ws_url: "/ws/bot/websocket",
       ticket: Base.url_encode64(:crypto.strong_rand_bytes(12))
     }
+  end
+
+  defp valid_room_id?(id) do
+    byte_size(id) in 1..64 and String.match?(id, ~r/^[a-z0-9][a-z0-9_-]*$/)
   end
 
   def ensure_room(room_id, opts \\ []) do
@@ -58,6 +93,21 @@ defmodule PartyLine.Rooms do
       [{pid, _}] -> {:ok, pid}
       [] -> {:error, :not_found}
     end
+  end
+
+  @doc """
+  Rooms in switchboard order: the configured lines first (in config order),
+  then any other live rooms alphabetically. The /line view windows the
+  first few of these.
+  """
+  def switchboard_rooms do
+    line_ids = for {id, _topic} <- Application.get_env(:party_line, :lines, []), do: id
+    rooms_by_id = Map.new(list_rooms(), &{&1.id, &1})
+
+    programmed = line_ids |> Enum.map(&rooms_by_id[&1]) |> Enum.reject(&is_nil/1)
+    rest = list_rooms() |> Enum.reject(&(&1.id in line_ids))
+
+    programmed ++ rest
   end
 
   @doc "Every bot currently on the exchange — feeds the /line phone directory."

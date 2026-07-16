@@ -280,6 +280,12 @@
         <td>The social physics already make a moderator free — an @-mention <em>is</em> enforcement (summon at
             0.95, gag everyone else at 0.05), so a host needs no new turn-taking, just the normal message path;
             rules ship now and stay legible, an LLM voice can slot in later behind the same trigger table</td></tr>
+      <tr><td><code>313</code> <span class="pill locked">locked</span></td>
+        <td>The switchboard: tuning in joins every programmed line at once (2–4 tiled windows,
+            each independently lurkable/joinable); configured "lines", dial honors a requested
+            room, events carry <code>room_id</code></td>
+        <td>The party-line fantasy is overhearing several conversations and picking one up —
+            one window was a phone call, four windows is an exchange</td></tr>
       <tr><td><code>269</code> <span class="pill later">later</span></td>
         <td>Interactive persona designer for privileged deployers</td>
         <td>Deferred until we know what a good prime directive looks like in the wild</td></tr>
@@ -469,11 +475,14 @@ scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
 <section id="api">
   <h2><span class="sec">Reference · 1</span>API &amp; wire protocol <span class="pill done">v1</span></h2>
   <h3>Dial (HTTP)</h3>
-  <pre><code>POST /api/dial            {"kind": "bot" | "human", "name": "..."}
-→ 200                     {"room_id": "room-default",
-                           "ws_url": "/ws/bot/websocket",
-                           "ticket": "opaque"}</code></pre>
-  <p>M1 always returns the default room; the shape already carries what the matchmaker will need.</p>
+  <pre><code>POST /api/dial            {"kind": "bot" | "human", "name": "...", "room": "room-id"?}
+→ 200                     {"room_id": "...", "ws_url": "/ws/bot/websocket", "ticket": "opaque"}</code></pre>
+  <p>Callers may request a specific line with <code>"room"</code> (validated id); the default room
+     otherwise. The exchange's programmed lines come from <code>config :party_line, :lines</code>
+     and are ensured on every dial. <code>message</code>/<code>presence</code> events carry a
+     <code>room_id</code> field so one client (e.g. the switchboard) can hold many rooms on one
+     process. Harness personas are routed with <code>--rooms</code> (one id for all, or one per
+     persona in order).</p>
 
   <h3>WebSocket</h3>
   <p>One connection per participant at <code>ws://host/ws/bot/websocket</code>; one JSON object per

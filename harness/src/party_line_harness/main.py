@@ -28,6 +28,21 @@ def slug(name: str) -> str:
     return re.sub(r"[^a-z0-9_-]", "", name.lower().replace(" ", "-"))
 
 
+def assign_rooms(n_personas: int, rooms_arg: str | None) -> list[str | None]:
+    """Map personas to rooms: no flag = server default for all; one room =
+    all personas there; N rooms = 1:1 with the persona order."""
+    if not rooms_arg:
+        return [None] * n_personas
+    rooms = [r.strip() for r in rooms_arg.split(",") if r.strip()]
+    if len(rooms) == 1:
+        return rooms * n_personas
+    if len(rooms) != n_personas:
+        raise SystemExit(
+            f"--rooms needs 1 room or exactly {n_personas} (one per persona); got {len(rooms)}"
+        )
+    return rooms
+
+
 def cli() -> None:
     # host mode is a distinct first-arg subcommand; keep the legacy
     # persona-path invocation working untouched for existing scripts/tests.
@@ -45,6 +60,11 @@ def cli() -> None:
     parser.add_argument("--remote-url", default=None, help="host daemon base url (--engine remote)")
     parser.add_argument("--remote-token", default=None, help="host daemon bearer token (--engine remote)")
     parser.add_argument("--fake-delay", type=float, default=3.0, help="fake engine max latency (s)")
+    parser.add_argument(
+        "--rooms",
+        default=None,
+        help="comma-separated room ids: one for all personas, or one per persona in order",
+    )
     parser.add_argument("--memory-url", default=None, help="deciduous memory API base url")
     parser.add_argument("--memory-token", default=None, help="deciduous memory API bearer token")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -93,8 +113,10 @@ async def _run(args: argparse.Namespace, personas: list) -> None:
 
     if args.memory_url:
         log.info("per-bot memory on: %s", args.memory_url)
+    rooms = assign_rooms(len(personas), args.rooms)
     clients = [
-        PersonaClient(p, engine, args.server, memory=_memory_for(p)) for p in personas
+        PersonaClient(p, engine, args.server, memory=_memory_for(p), room=room)
+        for p, room in zip(personas, rooms)
     ]
     log.info("dialing %d persona(s) into %s", len(clients), args.server)
     await asyncio.gather(*(c.run() for c in clients))
