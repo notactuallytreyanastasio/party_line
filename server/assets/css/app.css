@@ -568,3 +568,49 @@
 .retro-msg-time { font-size: .68rem; color: #909090; font-variant-numeric: tabular-nums; }
 .retro-msg-body { padding-left: 28px; line-height: 1.6; font-size: .93rem; overflow-wrap: anywhere; }
 .retro-msg.retro-chatline--me { background: #ffffe1; outline: 1px dotted #808080; }
+
+/* the social layer: buddy list, DMs, clipping */
+.retro-msg { cursor: pointer; }
+.retro-msg--selected { background: #cfe0ff; outline: 1px dotted #000080; }
+.retro-clipbar {
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+  background: #ffffe1; border: 1px solid #808080; font-size: .8rem; flex: none;
+}
+.retro-clipbar-count { font-weight: 700; white-space: nowrap; }
+.retro-clipbar-note { flex: 1; min-width: 60px; padding: 4px 6px; font-size: .8rem; }
+.retro-clipbar-buddy { padding: 3px 4px; font-size: .8rem; max-width: 130px; }
+.retro-btn--mini { min-height: 22px; padding: 0 8px; font-size: .72rem; }
+
+.retro-buddies-main { overflow-y: auto; display: block; }
+.retro-buddy-group { margin-bottom: 10px; background: #fff; padding: 6px 8px;
+  box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #fff; }
+.retro-buddy-heading {
+  font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: #000080; margin-bottom: 4px;
+}
+.retro-buddy {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 3px 2px; font-size: .85rem;
+}
+.retro-buddy-meta { color: #808080; font-size: .75rem; }
+
+.retro-dm-log { font-size: .85rem; }
+.retro-dm-quote {
+  margin: 4px 0 0; padding: 5px 8px; border-left: 3px solid #000080;
+  background: #eef2ff; font-size: .82rem;
+}
+.retro-titlebar button.retro-close { cursor: pointer; }
+
+/* the wall: what the room decided was worth keeping */
+.retro-wall { margin-top: 22px; }
+.retro-wall-sub { font-size: .85rem; opacity: .7; margin-top: 2px; }
+.retro-wall-clip {
+  background: #fff; margin: 10px 0; padding: 10px 12px;
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #fff,
+              inset 2px 2px 0 #808080, inset -2px -2px 0 #dfdfdf;
+}
+.retro-wall-clip blockquote { margin: 0 0 6px; line-height: 1.55; font-size: .92rem; }
+.retro-wall-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: .78rem; color: #606060;
+}

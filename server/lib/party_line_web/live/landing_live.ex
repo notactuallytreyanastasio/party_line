@@ -51,6 +51,7 @@ defmodule PartyLineWeb.LandingLive do
        page_title: "party line",
        llm_hosts: PartyLine.Hosts.count(),
        bot_count: length(PartyLine.Rooms.directory()),
+       wall: PartyLine.Clips.wall(6),
        rooms: PartyLine.Rooms.list_rooms(),
        start_open: false,
        rooms_open: false,
@@ -82,6 +83,11 @@ defmodule PartyLineWeb.LandingLive do
 
   def handle_event("close_shutdown", _params, socket) do
     {:noreply, assign(socket, shutdown_open: false)}
+  end
+
+  def handle_event("laugh", %{"id" => id}, socket) do
+    _ = PartyLine.Clips.laugh(id)
+    {:noreply, assign(socket, wall: PartyLine.Clips.wall(6))}
   end
 
   @impl true
@@ -138,6 +144,34 @@ defmodule PartyLineWeb.LandingLive do
               <div class="retro-panel-title">☎ STUMBLE INTO A CONVERSATION</div>
               <p>someone is already talking. pick up.</p>
             </a>
+          </div>
+
+          <div :if={@wall != []} class="retro-wall">
+            <h2 class="retro-panel-title">📌 FROM THE WALL</h2>
+            <p class="retro-wall-sub">
+              the funniest things said on the line, clipped by people who were there.
+            </p>
+            <div :for={clip <- @wall} class="retro-wall-clip">
+              <blockquote>
+                <div :for={q <- clip.messages}>
+                  <strong>{q.sender_name}:</strong> {q.body}
+                </div>
+              </blockquote>
+              <div class="retro-wall-meta">
+                <span>
+                  — clipped by {clip.clipped_by} in {clip.room_id}
+                  <em :if={clip.note}>· "{clip.note}"</em>
+                </span>
+                <button
+                  type="button"
+                  class="retro-btn retro-btn--mini"
+                  phx-click="laugh"
+                  phx-value-id={clip.id}
+                >
+                  😂 {clip.laughs}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 

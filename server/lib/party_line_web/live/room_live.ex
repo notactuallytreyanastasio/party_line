@@ -12,7 +12,7 @@ defmodule PartyLineWeb.RoomLive do
 
   use PartyLineWeb, :live_view
 
-  alias PartyLine.Rooms
+  alias PartyLine.{Buddies, Clips, DMs, Rooms}
   alias PartyLine.Rooms.Room
 
   @max_windows 4
@@ -31,7 +31,8 @@ defmodule PartyLineWeb.RoomLive do
     {:ok,
      socket
      |> assign(page_title: "Party Line", stage: :dialing, name: "", error: nil)
-     |> assign(windows: [], directory: directory_text())}
+     |> assign(windows: [], directory: directory_text())
+     |> assign(buddies: [], dms: %{})}
   end
 
   @impl true
@@ -70,6 +71,67 @@ defmodule PartyLineWeb.RoomLive do
     end
 
     {:noreply, update_window(socket, room_id, &%{&1 | draft: ""})}
+  end
+
+  # ── Clipping (client hook pushes the selection; ids are message_ids) ─────
+
+  def handle_event("select", %{"room" => room_id, "ids" => ids}, socket) when is_list(ids) do
+    {:noreply, update_window(socket, room_id, &%{&1 | selected: ids})}
+  end
+
+  def handle_event("clip_wall", %{"room" => room_id} = params, socket) do
+    with %{selected: [_ | _]} = window <- window_for(socket, room_id),
+         [_ | _] = messages <- selected_messages(window) do
+      note = params |> Map.get("note", "") |> String.trim()
+
+      {:ok, _} =
+        Clips.clip(messages, %{
+          room_id: room_id,
+          topic: window.topic,
+          clipped_by: socket.assigns.name,
+          note: if(note == "", do: nil, else: note)
+        })
+    end
+
+    {:noreply, clear_selection(socket, room_id)}
+  end
+
+  def handle_event("clip_share", %{"room" => room_id, "buddy" => buddy}, socket)
+      when buddy != "" do
+    with %{selected: [_ | _]} = window <- window_for(socket, room_id),
+         [_ | _] = messages <- selected_messages(window) do
+      {:ok, _} =
+        DMs.send_dm(socket.assigns.name, buddy, "clipped from #{room_id}",
+          kind: :clip,
+          quoted: messages
+        )
+    end
+
+    {:noreply, clear_selection(socket, room_id)}
+  end
+
+  def handle_event("clip_clear", %{"room" => room_id}, socket) do
+    {:noreply, clear_selection(socket, room_id)}
+  end
+
+  # ── DMs ──────────────────────────────────────────────────────────────────
+
+  def handle_event("open_dm", %{"buddy" => buddy}, socket) do
+    {:noreply, open_dm(socket, buddy)}
+  end
+
+  def handle_event("close_dm", %{"buddy" => buddy}, socket) do
+    {:noreply, assign(socket, dms: Map.delete(socket.assigns.dms, buddy))}
+  end
+
+  def handle_event("dm_draft", %{"buddy" => buddy, "body" => body}, socket) do
+    {:noreply, update_dm(socket, buddy, &%{&1 | draft: body})}
+  end
+
+  def handle_event("dm_send", %{"buddy" => buddy, "body" => body}, socket) do
+    body = String.trim(body)
+    if body != "", do: DMs.send_dm(socket.assigns.name, buddy, body)
+    {:noreply, update_dm(socket, buddy, &%{&1 | draft: ""})}
   end
 
   @impl true
@@ -118,6 +180,26 @@ defmodule PartyLineWeb.RoomLive do
      end)}
   end
 
+  def handle_info({:dm, other, message}, socket) do
+    socket =
+      if Map.has_key?(socket.assigns.dms, other) do
+        update_dm(socket, other, &%{&1 | history: &1.history ++ [message]})
+      else
+        open_dm(socket, other)
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_info(:refresh_buddies, socket) do
+    if socket.assigns.stage == :in_room do
+      Process.send_after(self(), :refresh_buddies, 10_000)
+      {:noreply, assign(socket, buddies: Buddies.online())}
+    else
+      {:noreply, socket}
+    end
+  end
+
   # humans don't bid; ignore director traffic (and legacy un-routed events)
   def handle_info({:party_line, _event}, socket), do: {:noreply, socket}
 
@@ -138,6 +220,10 @@ defmodule PartyLineWeb.RoomLive do
         {:noreply, assign(socket, error: "no lines are answering. odd. try again.")}
 
       windows ->
+        :ok = Buddies.register(name, self())
+        Phoenix.PubSub.subscribe(PartyLine.PubSub, DMs.topic(name))
+        Process.send_after(self(), :refresh_buddies, 10_000)
+
         socket =
           Enum.reduce(windows, socket, fn w, sock ->
             stream(sock, stream_name(w.index), w.transcript, reset: true)
@@ -146,6 +232,7 @@ defmodule PartyLineWeb.RoomLive do
         {:noreply,
          socket
          |> assign(stage: :in_room, name: name, error: nil)
+         |> assign(buddies: Buddies.online())
          |> assign(windows: Enum.map(windows, &Map.delete(&1, :transcript)))}
     end
   end
@@ -167,6 +254,7 @@ defmodule PartyLineWeb.RoomLive do
         roster: welcome.roster,
         lurking: true,
         draft: "",
+        selected: [],
         operator_line: operator_lines |> List.last() |> then(&(&1 && &1.body)),
         last_group: last_group,
         transcript: annotated
@@ -218,6 +306,38 @@ defmodule PartyLineWeb.RoomLive do
 
   defp window_for(socket, room_id),
     do: Enum.find(socket.assigns.windows, &(&1.room_id == room_id))
+
+  # Selected message_ids → conversation-ordered quote payloads, pulled from
+  # the room's canonical transcript (assigns only hold ids; streams own the
+  # rendered messages).
+  defp selected_messages(window) do
+    ids = MapSet.new(window.selected)
+
+    window.room
+    |> Room.snapshot()
+    |> Map.fetch!(:transcript)
+    |> Enum.filter(&MapSet.member?(ids, &1.message_id))
+    |> Enum.sort_by(& &1.seq)
+    |> Enum.map(&%{sender_name: &1.sender.name, kind: &1.sender.kind, body: &1.body, ts: &1.ts})
+  end
+
+  defp clear_selection(socket, room_id) do
+    socket
+    |> update_window(room_id, &%{&1 | selected: []})
+    |> push_event("clip:clear", %{room: room_id})
+  end
+
+  defp open_dm(socket, buddy) do
+    dm = %{history: DMs.history(socket.assigns.name, buddy), draft: ""}
+    assign(socket, dms: Map.put(socket.assigns.dms, buddy, dm))
+  end
+
+  defp update_dm(socket, buddy, fun) do
+    case socket.assigns.dms[buddy] do
+      nil -> socket
+      dm -> assign(socket, dms: Map.put(socket.assigns.dms, buddy, fun.(dm)))
+    end
+  end
 
   defp update_window(socket, room_id, fun) do
     windows =
@@ -311,11 +431,13 @@ defmodule PartyLineWeb.RoomLive do
               id={"messages-#{window.index}"}
               phx-update="stream"
               class="retro-chatlog"
-              phx-hook=".ScrollToBottom"
+              phx-hook=".Chatlog"
+              data-room={window.room_id}
             >
               <li
                 :for={{dom_id, message} <- @streams[stream_name(window.index)]}
                 id={dom_id}
+                data-mid={message.message_id}
                 class={[
                   "retro-msg",
                   Map.get(message, :group_start, true) && "retro-msg--start",
@@ -352,6 +474,49 @@ defmodule PartyLineWeb.RoomLive do
             </ul>
 
             <form
+              :if={window.selected != []}
+              id={"clipbar-#{window.index}"}
+              phx-submit="clip_wall"
+              class="retro-clipbar"
+            >
+              <input type="hidden" name="room" value={window.room_id} />
+              <span class="retro-clipbar-count">{length(window.selected)} clipped</span>
+              <input
+                type="text"
+                name="note"
+                placeholder="why is this funny?"
+                autocomplete="off"
+                class="retro-input retro-clipbar-note"
+              />
+              <button type="submit" class="retro-btn">😂 to the wall</button>
+              <select
+                name="buddy"
+                class="retro-input retro-clipbar-buddy"
+                form={"clipshare-#{window.index}"}
+              >
+                <option value="">share with…</option>
+                <option :for={b <- @buddies} :if={b != @name} value={b}>{b}</option>
+              </select>
+              <button type="submit" form={"clipshare-#{window.index}"} class="retro-btn">send</button>
+              <button
+                type="button"
+                phx-click="clip_clear"
+                phx-value-room={window.room_id}
+                class="retro-btn"
+              >
+                ✕
+              </button>
+            </form>
+            <form
+              :if={window.selected != []}
+              id={"clipshare-#{window.index}"}
+              phx-submit="clip_share"
+              style="display:none;"
+            >
+              <input type="hidden" name="room" value={window.room_id} />
+            </form>
+
+            <form
               id={"speak-form-#{window.index}"}
               phx-submit="speak"
               phx-change="draft"
@@ -381,11 +546,134 @@ defmodule PartyLineWeb.RoomLive do
           </div>
           <div class="retro-resize-grip" aria-hidden="true"></div>
         </div>
+
+        <div
+          id="pane-buddies"
+          class="retro-window retro-window--pane retro-buddies"
+          phx-hook=".DraggableWindow"
+          data-pos="right"
+          data-w="240"
+          data-h="440"
+        >
+          <div class="retro-titlebar">
+            <span class="retro-titlebar-title">★ buddy list</span>
+          </div>
+          <div class="retro-pane-main retro-buddies-main">
+            <div class="retro-buddy-group">
+              <div class="retro-buddy-heading">▼ lines ({length(@windows)})</div>
+              <div :for={w <- @windows} class="retro-buddy">
+                <span>☎ {w.room_id}</span>
+                <span class="retro-buddy-meta">{length(w.roster)} on</span>
+              </div>
+            </div>
+            <div class="retro-buddy-group">
+              <div class="retro-buddy-heading">▼ online ({length(@buddies)})</div>
+              <div :for={buddy <- @buddies} class="retro-buddy">
+                <span>🙂 {buddy}<span :if={buddy == @name} class="retro-buddy-meta"> (you)</span></span>
+                <button
+                  :if={buddy != @name}
+                  type="button"
+                  class="retro-btn retro-btn--mini"
+                  phx-click="open_dm"
+                  phx-value-buddy={buddy}
+                >
+                  IM
+                </button>
+              </div>
+              <div :if={@buddies == [@name] or @buddies == []} class="retro-buddy retro-buddy-meta">
+                nobody else on the exchange. lurk a while.
+              </div>
+            </div>
+          </div>
+          <div class="retro-statusbar">
+            <span>screen name: {@name}</span>
+          </div>
+          <div class="retro-resize-grip" aria-hidden="true"></div>
+        </div>
+
+        <div
+          :for={{buddy, dm} <- @dms}
+          id={"dm-#{:erlang.phash2(buddy)}"}
+          class="retro-window retro-window--pane retro-dm"
+          phx-hook=".DraggableWindow"
+          data-pos="cascade"
+          data-cx={:erlang.phash2(buddy, 6)}
+          data-w="360"
+          data-h="380"
+        >
+          <div class="retro-titlebar">
+            <button
+              type="button"
+              class="retro-close"
+              phx-click="close_dm"
+              phx-value-buddy={buddy}
+              aria-label={"close conversation with #{buddy}"}
+            ></button>
+            <span class="retro-titlebar-title">✉ {buddy}</span>
+          </div>
+          <div class="retro-pane-main">
+            <ul class="retro-chatlog retro-dm-log">
+              <li :for={message <- dm.history} class="retro-msg retro-msg--start">
+                <div class="retro-msg-head">
+                  <span class="retro-avatar" style={avatar_style(message.from)} aria-hidden="true">
+                    {initial(message.from)}
+                  </span>
+                  <span class="retro-chatname">{message.from}</span>
+                </div>
+                <div class="retro-msg-body">
+                  {message.body}
+                  <blockquote :if={message.kind == :clip} class="retro-dm-quote">
+                    <div :for={q <- message.quoted}>
+                      <strong>{q.sender_name}:</strong> {q.body}
+                    </div>
+                  </blockquote>
+                </div>
+              </li>
+            </ul>
+            <form phx-submit="dm_send" phx-change="dm_draft" class="retro-inputrow">
+              <input type="hidden" name="buddy" value={buddy} />
+              <input
+                type="text"
+                name="body"
+                value={dm.draft}
+                placeholder={"message #{buddy}"}
+                autocomplete="off"
+                class="retro-input"
+              />
+              <button type="submit" class="retro-btn">send</button>
+            </form>
+          </div>
+          <div class="retro-resize-grip" aria-hidden="true"></div>
+        </div>
       </div>
-      <script :type={Phoenix.LiveView.ColocatedHook} name=".ScrollToBottom">
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".Chatlog">
         export default {
-          mounted() { this.el.scrollTop = this.el.scrollHeight },
-          updated() { this.el.scrollTop = this.el.scrollHeight }
+          mounted() {
+            this.selected = new Set()
+            this.el.addEventListener("click", (e) => {
+              if (e.target.closest("a,button,input")) return
+              const li = e.target.closest("li.retro-msg")
+              if (!li || !li.dataset.mid) return
+              const id = li.dataset.mid
+              if (this.selected.has(id)) {
+                this.selected.delete(id)
+                li.classList.remove("retro-msg--selected")
+              } else {
+                this.selected.add(id)
+                li.classList.add("retro-msg--selected")
+              }
+              this.pushEvent("select", { room: this.el.dataset.room, ids: [...this.selected] })
+            })
+            this.handleEvent("clip:clear", ({ room }) => {
+              if (room !== this.el.dataset.room) return
+              this.selected.clear()
+              this.el.querySelectorAll(".retro-msg--selected")
+                .forEach((el) => el.classList.remove("retro-msg--selected"))
+            })
+            this.scroll()
+          },
+          updated() { this.scroll() },
+          scroll() { this.el.scrollTop = this.el.scrollHeight }
         }
       </script>
       <script :type={Phoenix.LiveView.ColocatedHook} name=".LocalTime">
@@ -401,17 +689,30 @@ defmodule PartyLineWeb.RoomLive do
       <script :type={Phoenix.LiveView.ColocatedHook} name=".DraggableWindow">
         export default {
           mounted() {
-            const idx = parseInt(this.el.dataset.index, 10)
-            const n = parseInt(this.el.dataset.count, 10)
             const pad = 14
-            const cols = n === 1 ? 1 : 2
-            const rows = Math.ceil(n / cols)
             const W = window.innerWidth, H = window.innerHeight
-            const w = Math.min(880, (W - pad * (cols + 1)) / cols)
-            const h = (H - pad * (rows + 1)) / rows
-            const col = idx % cols, row = Math.floor(idx / cols)
-            this.pos = { x: pad + col * (w + pad), y: pad + row * (h + pad), w, h }
+            const ds = this.el.dataset
+
+            if (ds.pos === "right") {
+              const w = parseInt(ds.w, 10), h = parseInt(ds.h, 10)
+              this.pos = { x: W - w - pad, y: pad, w, h }
+            } else if (ds.pos === "cascade") {
+              const w = parseInt(ds.w, 10), h = parseInt(ds.h, 10)
+              const c = parseInt(ds.cx || "0", 10)
+              this.pos = { x: 80 + c * 36, y: 70 + c * 30, w, h }
+            } else {
+              const idx = parseInt(ds.index, 10)
+              const n = parseInt(ds.count, 10)
+              const cols = n === 1 ? 1 : 2
+              const rows = Math.ceil(n / cols)
+              // leave room for the buddy list on the right
+              const w = Math.min(880, (W - 270 - pad * (cols + 1)) / cols)
+              const h = (H - pad * (rows + 1)) / rows
+              const col = idx % cols, row = Math.floor(idx / cols)
+              this.pos = { x: pad + col * (w + pad), y: pad + row * (h + pad), w, h }
+            }
             this.apply()
+            this.raise()
 
             this.el.addEventListener("pointerdown", () => this.raise())
             const bar = this.el.querySelector(".retro-titlebar")

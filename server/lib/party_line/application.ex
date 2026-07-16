@@ -15,6 +15,9 @@ defmodule PartyLine.Application do
         # Root chat tree ingestion. Always started; no-ops when :memory is
         # disabled, and degrades gracefully when the deciduous daemon is down.
         PartyLine.Memory.Ingest,
+        {PartyLine.Buddies, []},
+        {PartyLine.DMs, []},
+        {PartyLine.Clips, []},
         # Soft-state catalog of tailnet-exposed LLM hosts.
         PartyLine.Hosts
       ] ++

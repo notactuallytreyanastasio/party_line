@@ -106,6 +106,69 @@ defmodule PartyLineWeb.RoomLiveTest do
     refute Enum.any?(Room.snapshot(room_b).transcript, &(&1.body == "hello line a"))
   end
 
+  test "buddy list, clipping to the wall, and DMs", %{conn: conn} do
+    {:ok, v1, _} = live(conn, "/line")
+    v1 |> element("form") |> render_submit(%{name: "clipper"})
+
+    {:ok, v2, _} = live(Phoenix.ConnTest.build_conn(), "/line")
+    v2 |> element("form") |> render_submit(%{name: "receiver"})
+
+    # AIM energy: rooms + online users + your screen name
+    html = render(v2)
+    assert html =~ "buddy list"
+    assert html =~ "clipper"
+    assert html =~ "screen name: receiver"
+
+    # someone says something worth keeping (unique per run: the clips DETS
+    # file survives across test runs by design)
+    uniq = System.unique_integer([:positive])
+    body = "unique-clip-body-#{uniq}"
+    note = "lmaoo-#{uniq}"
+
+    {:ok, room} = Rooms.whereis("room-default")
+    pid = spawn_link(fn -> Process.sleep(:infinity) end)
+    {:ok, w} = Room.join(room, %{name: "Speaker", kind: :human, pid: pid})
+    Room.speak(room, w.participant_id, nil, body)
+
+    msg = Enum.find(Room.snapshot(room).transcript, &(&1.body == body))
+
+    # the client hook pushes the selection; then clip it to the wall
+    idx = window_index(v2, "room-default")
+
+    v2
+    |> element("#messages-#{idx}")
+    |> render_hook("select", %{"room" => "room-default", "ids" => [msg.message_id]})
+
+    assert render(v2) =~ "1 clipped"
+    v2 |> element("#clipbar-#{idx}") |> render_submit(%{note: note})
+
+    clip = Enum.find(PartyLine.Clips.wall(50), &(&1.note == note))
+    assert clip.clipped_by == "receiver"
+    assert [%{body: ^body, sender_name: "Speaker"}] = clip.messages
+    # selection cleared after clipping
+    refute render(v2) =~ "1 clipped"
+
+    # DM: receiver IMs clipper; clipper's switchboard auto-opens the window
+    v2 |> element(~s{button[phx-value-buddy="clipper"]}, "IM") |> render_click()
+
+    v2
+    |> element(~s{form[phx-submit="dm_send"]})
+    |> render_submit(%{buddy: "clipper", body: "did you see that"})
+
+    Process.sleep(30)
+    html1 = render(v1)
+    assert html1 =~ "✉ receiver"
+    assert html1 =~ "did you see that"
+
+    # the landing wall shows it, and laughing counts
+    {:ok, landing, lhtml} = live(Phoenix.ConnTest.build_conn(), "/")
+    assert lhtml =~ "FROM THE WALL"
+    assert lhtml =~ body
+
+    landing |> element(~s{button[phx-value-id="#{clip.id}"]}) |> render_click()
+    assert %{laughs: 1} = Enum.find(PartyLine.Clips.wall(50), &(&1.id == clip.id))
+  end
+
   # find which window index a room landed in (window order = list_rooms order)
   defp window_index(view, room_id) do
     html = render(view)

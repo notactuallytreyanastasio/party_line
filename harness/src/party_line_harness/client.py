@@ -83,7 +83,9 @@ class PersonaClient:
             try:
                 await self._session()
                 attempt = 0
-            except (OSError, websockets.WebSocketException) as exc:
+            except (OSError, httpx.HTTPError, websockets.WebSocketException) as exc:
+                # httpx errors (dial) are NOT OSErrors — a server restart
+                # must mean "redial with backoff", never a dead persona
                 delay = RECONNECT_DELAYS[min(attempt, len(RECONNECT_DELAYS) - 1)]
                 attempt += 1
                 log.warning("%s: connection lost (%s); redialing in %ss", self.persona.name, exc, delay)

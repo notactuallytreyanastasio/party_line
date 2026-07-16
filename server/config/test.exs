@@ -38,3 +38,8 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# clips live in a throwaway file, fresh per test run
+config :party_line,
+       :clips_path,
+       System.tmp_dir!() <> "/party_line_test_clips_#{System.os_time(:millisecond)}.dets"
