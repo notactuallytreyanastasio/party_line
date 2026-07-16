@@ -296,3 +296,107 @@
     transition: none;
   }
 }
+
+/* windoze 95 desktop: taskbar, start menu, brand strip */
+.retro-desktop {
+  background-color: #008080;
+  background-image: repeating-conic-gradient(#007a7a 0% 25%, #008080 0% 50%);
+  background-size: 4px 4px;
+  padding-bottom: 56px; /* keep the window clear of the taskbar */
+}
+
+.retro-taskbar {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 40px; z-index: 40;
+  background: #c0c0c0; display: flex; align-items: center; gap: 8px;
+  padding: 3px 6px; border-top: 1px solid #fff;
+  box-shadow: inset 0 1px 0 #dfdfdf;
+}
+.retro-start-btn {
+  display: flex; align-items: center; gap: 6px; padding: 2px 10px 2px 6px;
+  height: 30px; background: #c0c0c0; font-weight: 700; cursor: pointer;
+  border: none; font-family: inherit; font-size: 0.9rem; color: #000;
+  box-shadow: inset -1px -1px 0 #000, inset 1px 1px 0 #fff,
+              inset -2px -2px 0 #808080, inset 2px 2px 0 #dfdfdf;
+}
+.retro-start-btn:active, .retro-start-btn[aria-expanded="true"] {
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #fff,
+              inset 2px 2px 0 #808080, inset -2px -2px 0 #dfdfdf;
+}
+.retro-task {
+  flex: 0 1 220px; height: 30px; display: flex; align-items: center; gap: 6px;
+  padding: 0 8px; font-size: 0.82rem; overflow: hidden; white-space: nowrap;
+  box-shadow: inset 1px 1px 0 #000, inset -1px -1px 0 #fff,
+              inset 2px 2px 0 #808080, inset -2px -2px 0 #dfdfdf;
+}
+.retro-tray {
+  margin-left: auto; height: 30px; display: flex; align-items: center; gap: 8px;
+  padding: 0 10px; font-size: 0.82rem; font-variant-numeric: tabular-nums;
+  box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #fff;
+}
+
+.retro-start-menu {
+  position: fixed; left: 4px; bottom: 44px; z-index: 50; width: 250px;
+  background: #c0c0c0; display: flex;
+  border: 1px solid #000;
+  box-shadow: inset -1px -1px 0 #404040, inset 1px 1px 0 #fff, 3px 3px 0 rgba(0,0,0,.4);
+}
+.retro-menu-banner {
+  width: 26px; background: #000080; color: #fff; writing-mode: vertical-rl;
+  transform: rotate(180deg); display: flex; align-items: center;
+  padding: 8px 2px; font-weight: 700; letter-spacing: .12em; font-size: .8rem;
+}
+.retro-menu-items { flex: 1; padding: 3px; display: flex; flex-direction: column; }
+.retro-menu-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 10px; font-size: .88rem; cursor: pointer; color: #000;
+  background: none; border: none; font-family: inherit; text-align: left;
+  text-decoration: none; width: 100%;
+}
+.retro-menu-item:hover, .retro-menu-item[aria-expanded="true"] { background: #000080; color: #fff; }
+.retro-menu-item[disabled], .retro-menu-item.disabled {
+  color: #808080; text-shadow: 1px 1px 0 #fff; cursor: default;
+}
+.retro-menu-item[disabled]:hover, .retro-menu-item.disabled:hover { background: none; color: #808080; }
+.retro-menu-sep { height: 0; border-top: 1px solid #808080; border-bottom: 1px solid #fff; margin: 3px 4px; }
+.retro-submenu {
+  position: absolute; left: 100%; bottom: 0; width: 270px; background: #c0c0c0;
+  border: 1px solid #000; padding: 3px;
+  box-shadow: inset -1px -1px 0 #404040, inset 1px 1px 0 #fff, 3px 3px 0 rgba(0,0,0,.4);
+}
+.retro-menu-anchor { position: relative; }
+.retro-submenu .retro-menu-item small { display: block; font-size: .72rem; opacity: .75; }
+
+/* the merger nobody asked for */
+.retro-brandstrip {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  padding: 8px 12px; background: #fff; border-bottom: 1px solid #000;
+}
+.retro-flag { display: inline-grid; grid-template-columns: 13px 13px; gap: 2px; transform: rotate(-4deg); }
+.retro-flag i { width: 13px; height: 11px; display: block; }
+.retro-flag i:nth-child(1) { background: #e34234; transform: skewY(-7deg) rotate(2deg); }
+.retro-flag i:nth-child(2) { background: #7fba00; transform: skewY(-7deg) rotate(-3deg) translateY(1px); }
+.retro-flag i:nth-child(3) { background: #05a6f0; transform: skewY(-7deg) rotate(4deg); }
+.retro-flag i:nth-child(4) { background: #ffb900; transform: skewY(-7deg) rotate(-2deg) translateX(1px); }
+.retro-brand-word { font-weight: 700; letter-spacing: .04em; font-size: .95rem; }
+.retro-brand-word small { display: block; font-weight: 400; font-size: .62rem; letter-spacing: .18em; }
+.retro-merge-icon {
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid #000;
+  display: flex; align-items: center; justify-content: center; font-size: .95rem;
+  background: repeating-linear-gradient(45deg, #ffd400 0 4px, #000 4px 8px);
+}
+.retro-nextel {
+  background: #000; color: #ffd400; padding: 3px 10px; font-weight: 800;
+  letter-spacing: .1em; font-size: .9rem; display: flex; flex-direction: column;
+  align-items: center; line-height: 1.05; transform: rotate(1.5deg);
+}
+.retro-nextel .arrows { font-size: .6rem; letter-spacing: .35em; }
+
+.retro-dialog-overlay {
+  position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.25);
+  display: flex; align-items: center; justify-content: center;
+}
+.retro-dialog {
+  width: 360px; background: #c0c0c0; border: 1px solid #000;
+  box-shadow: inset -1px -1px 0 #404040, inset 1px 1px 0 #fff, 4px 4px 0 rgba(0,0,0,.45);
+}
+.retro-dialog .retro-body { text-align: center; }

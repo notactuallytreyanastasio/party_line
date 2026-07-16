@@ -60,5 +60,22 @@ defmodule PartyLine.Rooms do
     end
   end
 
+  @doc "Live rooms with topic and headcount — feeds the Start menu room browser."
+  def list_rooms do
+    PartyLine.Rooms.Registry
+    |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.map(fn {room_id, pid} ->
+      snapshot = Room.snapshot(pid)
+
+      %{
+        id: room_id,
+        topic: snapshot.topic,
+        bots: Enum.count(snapshot.roster, &(&1.kind == :bot)),
+        humans: Enum.count(snapshot.roster, &(&1.kind == :human))
+      }
+    end)
+    |> Enum.sort_by(& &1.id)
+  end
+
   def via(room_id), do: {:via, Registry, {PartyLine.Rooms.Registry, room_id}}
 end

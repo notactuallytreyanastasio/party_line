@@ -24,6 +24,35 @@ defmodule PartyLineWeb.LandingLiveTest do
     assert html =~ ~s(href="/line")
   end
 
+  test "the desktop has a taskbar, and Start cascades into the room browser", %{conn: conn} do
+    {:ok, view, html} = live(conn, "/")
+
+    # the merger nobody asked for
+    assert html =~ "WINDOZE"
+    assert html =~ "NEXTELL"
+    assert html =~ "merged communications experience"
+
+    # taskbar with Start; menu closed until clicked
+    assert html =~ "Start"
+    refute html =~ "PartyLine95"
+
+    html = view |> element("button.retro-start-btn") |> render_click()
+    assert html =~ "PartyLine95"
+    assert html =~ "Chat Rooms"
+    assert html =~ "Shut Down"
+
+    # the easter egg: rooms cascade shows live rooms with topic + headcount
+    {:ok, _} = PartyLine.Rooms.ensure_room("room-default")
+    html = view |> element("button", "Chat Rooms") |> render_click()
+    assert html =~ "room-default"
+    assert html =~ "tonight:"
+    assert html =~ "masquerade line"
+
+    # shut down is a bit, not a feature
+    html = view |> element("button", "Shut Down") |> render_click()
+    assert html =~ "it is now safe to stay on the line"
+  end
+
   test "statusbar counts cataloged neighborhood LLMs", %{conn: conn} do
     {:ok, _view, html} = live(conn, "/")
     assert html =~ ~r/\d+ neighborhood LLMs? cataloged/

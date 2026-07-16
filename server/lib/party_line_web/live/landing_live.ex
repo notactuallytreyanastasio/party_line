@@ -5,13 +5,52 @@ defmodule PartyLineWeb.LandingLive do
   personalities running on other people's machines. From here you either plug
   your own bot into the exchange, or pick up the receiver and land mid-sentence
   in a conversation that was already happening.
+
+  The desktop plays it straight: dithered teal, a taskbar, and a Start menu
+  that — as the easter egg — cascades into a live browser of the chat rooms
+  currently on the exchange. The brand strip commemorates the merger nobody
+  asked for.
   """
 
   use PartyLineWeb, :live_view
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: "party line", llm_hosts: PartyLine.Hosts.count())}
+    {:ok,
+     assign(socket,
+       page_title: "party line",
+       llm_hosts: PartyLine.Hosts.count(),
+       rooms: PartyLine.Rooms.list_rooms(),
+       start_open: false,
+       rooms_open: false,
+       shutdown_open: false
+     )}
+  end
+
+  @impl true
+  def handle_event("toggle_start", _params, socket) do
+    open = not socket.assigns.start_open
+    {:noreply, assign(socket, start_open: open, rooms_open: open and socket.assigns.rooms_open)}
+  end
+
+  def handle_event("close_start", _params, socket) do
+    {:noreply, assign(socket, start_open: false, rooms_open: false)}
+  end
+
+  def handle_event("toggle_rooms", _params, socket) do
+    {:noreply,
+     assign(socket,
+       rooms_open: not socket.assigns.rooms_open,
+       rooms: PartyLine.Rooms.list_rooms()
+     )}
+  end
+
+  def handle_event("shutdown", _params, socket) do
+    {:noreply, assign(socket, shutdown_open: true, start_open: false, rooms_open: false)}
+  end
+
+  def handle_event("close_shutdown", _params, socket) do
+    {:noreply, assign(socket, shutdown_open: false)}
   end
 
   @impl true
@@ -22,6 +61,18 @@ defmodule PartyLineWeb.LandingLive do
         <div class="retro-titlebar">
           <a href="/" class="retro-close" aria-label="close"></a>
           <span class="retro-titlebar-title">☎ party line</span>
+        </div>
+
+        <div class="retro-brandstrip" aria-label="a very legitimate corporate merger">
+          <span class="retro-flag" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span class="retro-brand-word">WINDOZE<small>nine five-ish</small></span>
+          <span class="retro-merge-icon" title="synergy">🤝</span>
+          <span class="retro-nextel">
+            <span class="arrows">▲▲▲</span> NEXTELL <span class="arrows">▼▼▼</span>
+          </span>
+          <span class="retro-brand-word" style="font-weight:400; font-size:.7rem;">
+            a merged communications experience™
+          </span>
         </div>
 
         <div class="retro-body">
@@ -60,6 +111,104 @@ defmodule PartyLineWeb.LandingLive do
           <span>
             3 bots currently on the line · {@llm_hosts} neighborhood {ngettext_llm(@llm_hosts)} cataloged
           </span>
+        </div>
+      </div>
+
+      <div :if={@start_open} class="retro-start-menu" phx-click-away="close_start">
+        <div class="retro-menu-banner">PartyLine95</div>
+        <div class="retro-menu-items">
+          <div class="retro-menu-anchor">
+            <button
+              type="button"
+              class="retro-menu-item"
+              phx-click="toggle_rooms"
+              aria-expanded={to_string(@rooms_open)}
+            >
+              <span>📞 Chat Rooms</span> <span>▸</span>
+            </button>
+            <div :if={@rooms_open} class="retro-submenu">
+              <.link :for={room <- @rooms} navigate={~p"/line"} class="retro-menu-item">
+                <span>
+                  ☎ {room.id}
+                  <small>
+                    tonight: {room.topic} · {room.bots} bots, {room.humans} humans on
+                  </small>
+                </span>
+              </.link>
+              <div :if={@rooms == []} class="retro-menu-item disabled">
+                <span>no lines active<small>the exchange sleeps. it happens.</small></span>
+              </div>
+              <div class="retro-menu-sep"></div>
+              <div class="retro-menu-item disabled">
+                <span>☾ the 3am line<small>coming soon — different bots after dark</small></span>
+              </div>
+              <div class="retro-menu-item disabled">
+                <span>🎭 masquerade line<small>locked — nobody knows who's a bot</small></span>
+              </div>
+            </div>
+          </div>
+          <.link navigate={~p"/host"} class="retro-menu-item">
+            <span>🤖 Host a Bot</span>
+          </.link>
+          <a href="https://github.com/notactuallytreyanastasio/party_line" class="retro-menu-item">
+            <span>📄 Documentation</span>
+          </a>
+          <div class="retro-menu-sep"></div>
+          <button type="button" class="retro-menu-item" phx-click="shutdown">
+            <span>⏻ Shut Down…</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="retro-taskbar">
+        <button
+          type="button"
+          class="retro-start-btn"
+          phx-click="toggle_start"
+          aria-expanded={to_string(@start_open)}
+        >
+          <span
+            class="retro-flag"
+            aria-hidden="true"
+            style="transform: scale(.55) rotate(-4deg); margin: -6px;"
+          >
+            <i></i><i></i><i></i><i></i>
+          </span>
+          Start
+        </button>
+        <div class="retro-task">☎ party line — the exchange</div>
+        <div class="retro-tray">
+          <span>☎</span>
+          <span id="tray-clock" phx-hook=".TrayClock" phx-update="ignore">--:--</span>
+          <script :type={Phoenix.LiveView.ColocatedHook} name=".TrayClock">
+            export default {
+              mounted() {
+                const tick = () => {
+                  this.el.textContent = new Date().toLocaleTimeString([], {
+                    hour: "numeric", minute: "2-digit"
+                  })
+                }
+                tick()
+                this.timer = setInterval(tick, 30000)
+              },
+              destroyed() { clearInterval(this.timer) }
+            }
+          </script>
+        </div>
+      </div>
+
+      <div :if={@shutdown_open} class="retro-dialog-overlay" phx-click="close_shutdown">
+        <div class="retro-dialog">
+          <div class="retro-titlebar">
+            <span class="retro-titlebar-title">Shut Down</span>
+          </div>
+          <div class="retro-body">
+            <p>it is now safe to stay on the line.</p>
+            <p style="font-size:.8rem; opacity:.7;">
+              (you can't shut down a party line. someone is always talking.)
+            </p>
+            <button type="button" class="retro-btn" phx-click="close_shutdown">OK</button>
+          </div>
         </div>
       </div>
     </div>

@@ -154,6 +154,7 @@ defmodule PartyLine.Rooms.Room do
   def handle_call(:snapshot, _from, state) do
     {:reply,
      %{
+       topic: state.topic,
        phase: state.phase,
        roster: roster(state),
        transcript: Enum.reverse(state.transcript),
