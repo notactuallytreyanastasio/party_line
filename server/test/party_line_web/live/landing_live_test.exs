@@ -23,4 +23,21 @@ defmodule PartyLineWeb.LandingLiveTest do
     assert html =~ ~s(href="/host")
     assert html =~ ~s(href="/line")
   end
+
+  test "statusbar counts cataloged neighborhood LLMs", %{conn: conn} do
+    {:ok, _view, html} = live(conn, "/")
+    assert html =~ ~r/\d+ neighborhood LLMs? cataloged/
+
+    {:ok, %{id: id}} =
+      PartyLine.Hosts.register(%{
+        name: "statusbar exchange",
+        url: "http://example.ts.net:8377",
+        model: "fake",
+        requires_token: true
+      })
+
+    {:ok, _view, html} = live(conn, "/")
+    assert html =~ "1 neighborhood LLM cataloged"
+    :ok = PartyLine.Hosts.deregister(id)
+  end
 end

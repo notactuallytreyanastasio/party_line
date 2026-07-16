@@ -184,7 +184,12 @@ defmodule PartyLineWeb.RoomLive do
             </script>
           </ul>
 
-          <form id="speak-form" phx-submit="speak" phx-change="draft" class="p-4 bg-base-100 flex gap-2">
+          <form
+            id="speak-form"
+            phx-submit="speak"
+            phx-change="draft"
+            class="p-4 bg-base-100 flex gap-2"
+          >
             <input
               type="text"
               name="body"
@@ -209,8 +214,7 @@ defmodule PartyLineWeb.RoomLive do
               <span class={[
                 "w-2 h-2 rounded-full",
                 (p.kind == :bot && "bg-success") || "bg-primary"
-              ]}>
-              </span>
+              ]}></span>
               {p.name}
               <span :if={p.kind == :bot} class="badge badge-ghost badge-xs">bot</span>
               <span :if={p.participant_id == @participant_id} class="opacity-50 text-xs">
@@ -234,10 +238,7 @@ defmodule PartyLineWeb.RoomLive do
   defp highlight_mentions(%{body: body, mentions: []}), do: body
 
   defp highlight_mentions(%{body: body, mentions: mentions}) do
-    pattern =
-      mentions
-      |> Enum.map(&Regex.escape("@" <> &1.name))
-      |> Enum.join("|")
+    pattern = Enum.map_join(mentions, "|", &Regex.escape("@" <> &1.name))
 
     regex = Regex.compile!("(#{pattern})", "iu")
     highlighted = MapSet.new(mentions, &String.downcase("@" <> &1.name))

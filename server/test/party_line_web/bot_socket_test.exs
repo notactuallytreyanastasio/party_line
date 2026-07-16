@@ -33,7 +33,9 @@ defmodule PartyLineWeb.BotSocketTest do
     end
 
     def send!(ws, payload) do
-      {:ok, websocket, data} = Mint.WebSocket.encode(ws.websocket, {:text, Jason.encode!(payload)})
+      {:ok, websocket, data} =
+        Mint.WebSocket.encode(ws.websocket, {:text, Jason.encode!(payload)})
+
       {:ok, conn} = Mint.WebSocket.stream_request_body(ws.conn, ws.ref, data)
       %{ws | conn: conn, websocket: websocket}
     end
@@ -74,27 +76,27 @@ defmodule PartyLineWeb.BotSocketTest do
 
     defp handle_stream(ws, pred, deadline, message) do
       case Mint.WebSocket.stream(ws.conn, message) do
-            {:ok, conn, responses} ->
-              frames =
-                for {:data, ref, data} <- responses, ref == ws.ref do
-                  {:ok, _websocket, frames} = Mint.WebSocket.decode(ws.websocket, data)
-                  frames
-                end
+        {:ok, conn, responses} ->
+          frames =
+            for {:data, ref, data} <- responses, ref == ws.ref do
+              {:ok, _websocket, frames} = Mint.WebSocket.decode(ws.websocket, data)
+              frames
+            end
 
-              decoded =
-                frames
-                |> List.flatten()
-                |> Enum.flat_map(fn
-                  {:text, text} -> [Jason.decode!(text)]
-                  _ -> []
-                end)
+          decoded =
+            frames
+            |> List.flatten()
+            |> Enum.flat_map(fn
+              {:text, text} -> [Jason.decode!(text)]
+              _ -> []
+            end)
 
-              ws = %{ws | conn: conn, buffer: ws.buffer ++ decoded}
+          ws = %{ws | conn: conn, buffer: ws.buffer ++ decoded}
 
-              case Enum.find(ws.buffer, pred) do
-                nil -> recv_loop(ws, pred, deadline)
-                match -> {match, %{ws | buffer: List.delete(ws.buffer, match)}}
-              end
+          case Enum.find(ws.buffer, pred) do
+            nil -> recv_loop(ws, pred, deadline)
+            match -> {match, %{ws | buffer: List.delete(ws.buffer, match)}}
+          end
 
         {:error, _conn, reason, _} ->
           raise "websocket error: #{inspect(reason)}"

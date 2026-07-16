@@ -128,8 +128,7 @@ defmodule PartyLine.Rooms.Room do
       participant_id: id,
       room: %{id: state.id, topic: state.topic},
       roster: roster(state),
-      transcript:
-        state.transcript |> Enum.take(state.config.welcome_tail) |> Enum.reverse()
+      transcript: state.transcript |> Enum.take(state.config.welcome_tail) |> Enum.reverse()
     }
 
     state = maybe_wake(state, kind)
@@ -382,7 +381,12 @@ defmodule PartyLine.Rooms.Room do
   defp bot_speak(state, p, grant_id, body, client_ref) do
     case state.current_grant do
       %{id: ^grant_id, participant_id: participant_id} when participant_id == p.id ->
-        state = %{cancel_timer(state) | current_grant: nil, strikes: Map.delete(state.strikes, p.id)}
+        state = %{
+          cancel_timer(state)
+          | current_grant: nil,
+            strikes: Map.delete(state.strikes, p.id)
+        }
+
         state = commit_message(state, p, body)
         schedule_cooldown(state)
 
@@ -472,11 +476,15 @@ defmodule PartyLine.Rooms.Room do
               state
           end
 
-        if Enum.any?(state.participants, fn {_, q} -> q.kind == :bot end) do
-          state
-        else
-          %{cancel_timer(state) | phase: :idle, current_beat: nil, bids: %{}}
-        end
+        idle_if_no_bots(state)
+    end
+  end
+
+  defp idle_if_no_bots(state) do
+    if Enum.any?(state.participants, fn {_, q} -> q.kind == :bot end) do
+      state
+    else
+      %{cancel_timer(state) | phase: :idle, current_beat: nil, bids: %{}}
     end
   end
 

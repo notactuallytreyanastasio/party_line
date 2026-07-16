@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 server/transcripts/
+
+# Deciduous database (local)
+.deciduous/

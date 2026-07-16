@@ -11,7 +11,21 @@ defmodule PartyLine.MixProject do
       aliases: aliases(),
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
-      listeners: [Phoenix.CodeReloader]
+      listeners: [Phoenix.CodeReloader],
+      compile_options: [:debug_info],
+      # Assay (incremental Dialyzer) configuration. Analyze the project plus its
+      # deps for accurate success typing, but only surface warnings for our code.
+      assay: [
+        dialyzer: [
+          # :crypto and :mix aren't pulled in by :project_plus_deps but our code
+          # (random ids, hashing) and mix tasks call them — include them so they
+          # resolve instead of producing "unknown function" false positives.
+          # :ex_unit is needed because `mix check` runs in the :test env, where
+          # test/support (ConnCase) compiles into the app and calls ExUnit.
+          apps: [:project_plus_deps, :crypto, :mix, :ex_unit],
+          warning_apps: :project
+        ]
+      ]
     ]
   end
 
@@ -27,7 +41,7 @@ defmodule PartyLine.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [precommit: :test, check: :test]
     ]
   end
 
@@ -70,7 +84,9 @@ defmodule PartyLine.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      {:mint_web_socket, "~> 1.0", only: :test}
+      {:mint_web_socket, "~> 1.0", only: :test},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:assay, "~> 0.5", runtime: false, only: [:dev, :test]}
     ]
   end
 
@@ -90,7 +106,8 @@ defmodule PartyLine.MixProject do
         "esbuild party_line --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"],
+      check: ["format --check-formatted", "credo", "test", "assay"]
     ]
   end
 end

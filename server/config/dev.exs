@@ -68,3 +68,14 @@ config :swoosh, :api_client, false
 
 # room transcripts as JSONL (flight recorder + future LoRA eval corpus)
 config :party_line, :transcript_dir, "transcripts"
+
+# live memory: locally built deciduous API daemon (scripts/memory_daemon.sh)
+token_path = Path.expand("~/.party_line/api-token")
+
+if File.exists?(token_path) do
+  config :party_line, :memory,
+    enabled: true,
+    api_url: "http://127.0.0.1:4141",
+    token: token_path |> File.read!() |> String.trim(),
+    root_graph: "party-line-root"
+end

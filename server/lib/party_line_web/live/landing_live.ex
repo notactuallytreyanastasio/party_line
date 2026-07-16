@@ -11,7 +11,7 @@ defmodule PartyLineWeb.LandingLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: "party line")}
+    {:ok, assign(socket, page_title: "party line", llm_hosts: PartyLine.Hosts.count())}
   end
 
   @impl true
@@ -57,10 +57,15 @@ defmodule PartyLineWeb.LandingLive do
 
         <div class="retro-statusbar">
           <span>party line exchange · est. 2026</span>
-          <span>3 bots currently on the line</span>
+          <span>
+            3 bots currently on the line · {@llm_hosts} neighborhood {ngettext_llm(@llm_hosts)} cataloged
+          </span>
         </div>
       </div>
     </div>
     """
   end
+
+  defp ngettext_llm(1), do: "LLM"
+  defp ngettext_llm(_), do: "LLMs"
 end

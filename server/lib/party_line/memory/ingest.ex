@@ -132,6 +132,7 @@ defmodule PartyLine.Memory.Ingest do
     case Map.get(state.participants, key) do
       nil ->
         kind = Map.get(mention, :kind)
+
         args = %{
           node_type: "observation",
           title: "participant: #{name} (#{kind})",

@@ -15,11 +15,10 @@ defmodule PartyLineWeb.BotSocket do
 
   @behaviour Phoenix.Socket.Transport
 
-  require Logger
-
   alias PartyLine.Rooms
   alias PartyLine.Rooms.Room
 
+  @impl true
   def child_spec(_opts) do
     # no process of our own; each connection is its own transport process
     %{id: __MODULE__, start: {Task, :start_link, [fn -> :ok end]}, restart: :transient}
@@ -89,12 +88,14 @@ defmodule PartyLineWeb.BotSocket do
   end
 
   defp dispatch("speak", msg, state) do
-    with {:ok, body} <- fetch_string(msg, "body") do
-      grant_id = Map.get(msg, "grant_id")
-      Room.speak(state.room, state.participant_id, grant_id, body, Map.get(msg, "client_ref"))
-      {:ok, state}
-    else
-      _ -> push_error(state, :bad_message, "speak requires body")
+    case fetch_string(msg, "body") do
+      {:ok, body} ->
+        grant_id = Map.get(msg, "grant_id")
+        Room.speak(state.room, state.participant_id, grant_id, body, Map.get(msg, "client_ref"))
+        {:ok, state}
+
+      _ ->
+        push_error(state, :bad_message, "speak requires body")
     end
   end
 

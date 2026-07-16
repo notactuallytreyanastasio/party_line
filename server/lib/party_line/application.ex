@@ -7,19 +7,22 @@ defmodule PartyLine.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      PartyLineWeb.Telemetry,
-      {DNSCluster, query: Application.get_env(:party_line, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: PartyLine.PubSub},
-      # Root chat tree ingestion. Always started; no-ops when :memory is
-      # disabled, and degrades gracefully when the deciduous daemon is down.
-      PartyLine.Memory.Ingest
-    ] ++
-      PartyLine.Rooms.child_specs() ++
+    children =
       [
-        # Start to serve requests, typically the last entry
-        PartyLineWeb.Endpoint
-      ]
+        PartyLineWeb.Telemetry,
+        {DNSCluster, query: Application.get_env(:party_line, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: PartyLine.PubSub},
+        # Root chat tree ingestion. Always started; no-ops when :memory is
+        # disabled, and degrades gracefully when the deciduous daemon is down.
+        PartyLine.Memory.Ingest,
+        # Soft-state catalog of tailnet-exposed LLM hosts.
+        PartyLine.Hosts
+      ] ++
+        PartyLine.Rooms.child_specs() ++
+        [
+          # Start to serve requests, typically the last entry
+          PartyLineWeb.Endpoint
+        ]
 
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options

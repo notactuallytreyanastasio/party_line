@@ -151,6 +151,7 @@ defmodule PartyLine.Rooms.RoomTest do
     Room.speak(room, h, nil, "@Ada what do you think?")
 
     assert_receive {:a, %{type: :grant_revoked, grant_id: ^grant, reason: :preempted}}, 1_000
+
     assert_receive {:a, %{type: :message, sender: %{kind: :human}, mentions: [%{name: "Ada"}]}},
                    1_000
 
@@ -186,6 +187,7 @@ defmodule PartyLine.Rooms.RoomTest do
     refute Enum.any?(snapshot.roster, &(&1.name == "Bobby"))
 
     :ok = Room.announce(room, h)
+
     assert_receive {:a, %{type: :presence, event: :announced, participant: %{name: "Bobby"}}},
                    1_000
 

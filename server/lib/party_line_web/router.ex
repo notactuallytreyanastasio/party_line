@@ -26,6 +26,11 @@ defmodule PartyLineWeb.Router do
     pipe_through :api
 
     post "/dial", DialController, :dial
+
+    get "/hosts", HostController, :index
+    post "/hosts/register", HostController, :register
+    post "/hosts/:id/heartbeat", HostController, :heartbeat
+    delete "/hosts/:id", HostController, :deregister
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

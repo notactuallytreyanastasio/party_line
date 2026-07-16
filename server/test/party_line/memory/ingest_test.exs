@@ -156,12 +156,28 @@ defmodule PartyLine.Memory.IngestTest do
     {agent, url} = start_stub()
     ingest = start_ingest(url)
 
-    Ingest.record_presence(ingest, "room-1", :joined, %{participant_id: "p-1", name: "Ada", kind: :bot})
-    Ingest.record_presence(ingest, "room-1", :announced, %{participant_id: "p-2", name: "Bo", kind: :human})
-    Ingest.record_presence(ingest, "room-1", :left, %{participant_id: "p-1", name: "Ada", kind: :bot})
+    Ingest.record_presence(ingest, "room-1", :joined, %{
+      participant_id: "p-1",
+      name: "Ada",
+      kind: :bot
+    })
+
+    Ingest.record_presence(ingest, "room-1", :announced, %{
+      participant_id: "p-2",
+      name: "Bo",
+      kind: :human
+    })
+
+    Ingest.record_presence(ingest, "room-1", :left, %{
+      participant_id: "p-1",
+      name: "Ada",
+      kind: :bot
+    })
+
     sync(ingest)
 
     adds = calls_to(agent, "/tools/add_node")
+
     assert Enum.map(adds, & &1.body["title"]) == [
              "presence: joined Ada",
              "presence: announced Bo",
@@ -179,7 +195,13 @@ defmodule PartyLine.Memory.IngestTest do
     ingest = start_ingest(url, enabled: false)
 
     Ingest.record_message(ingest, "room-1", msg(1, "Ada", "first"))
-    Ingest.record_presence(ingest, "room-1", :joined, %{participant_id: "p-1", name: "Ada", kind: :bot})
+
+    Ingest.record_presence(ingest, "room-1", :joined, %{
+      participant_id: "p-1",
+      name: "Ada",
+      kind: :bot
+    })
+
     sync(ingest)
 
     assert calls(agent) == []
@@ -199,6 +221,6 @@ defmodule PartyLine.Memory.IngestTest do
     sync(ingest)
 
     assert Process.alive?(ingest)
-    assert length(calls_to(agent, "/tools/add_node")) >= 1
+    assert calls_to(agent, "/tools/add_node") != []
   end
 end
