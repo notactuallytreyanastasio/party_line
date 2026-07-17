@@ -249,10 +249,21 @@ class PersonaClient:
         ask_id = event.get("ask_id")
         prompt = event.get("prompt", "")
         cancel = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        # stream tokens as they generate. The engine calls this from a worker
+        # thread, so hop back to the loop to send; fire-and-forget keeps
+        # generation from blocking on the socket. The authoritative `answered`
+        # below still carries the full body and closes the ask.
+        def on_delta(text: str) -> None:
+            if not text:
+                return
+            frame = json.dumps({"type": "answer_delta", "ask_id": ask_id, "delta": text})
+            asyncio.run_coroutine_threadsafe(ws.send(frame), loop)
 
         try:
             body = await self.engine.generate(
-                self.persona, prompt, [self.persona.name], [], cancel
+                self.persona, prompt, [self.persona.name], [], cancel, on_delta=on_delta
             )
         except Exception:
             log.exception("%s: answering failed", self.persona.name)

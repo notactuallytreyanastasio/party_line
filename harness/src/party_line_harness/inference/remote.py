@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -42,7 +42,13 @@ class RemoteEngine:
         transcript: list[dict[str, Any]],
         cancel: asyncio.Event,
         memories: list[str] | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> str | None:
+        # the daemon returns a whole body over HTTP, so there's nothing to
+        # stream — the answer degrades to a single delivery, which the server
+        # relays as one chunk.
+        _ = on_delta
+
         # best-effort cancellation: check going in …
         if cancel.is_set():
             return None

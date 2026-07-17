@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Any
+import re
+from typing import Any, Callable
 
 from ..persona import Persona
 
@@ -35,6 +36,11 @@ REPLIES = [
 ]
 
 
+def _words(text: str) -> list[str]:
+    # words with trailing whitespace kept, so the pieces rejoin to `text`
+    return re.findall(r"\S+\s*", text) or [text]
+
+
 class FakeEngine:
     def capabilities(self) -> dict:
         # No model, so claim none: the directory will read this as the
@@ -54,6 +60,7 @@ class FakeEngine:
         transcript: list[dict[str, Any]],
         cancel: asyncio.Event,
         memories: list[str] | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> str | None:
         _ = memories  # FakeEngine has no prompt to fold memories into
         delay = self.rng.uniform(self.min_delay, self.max_delay)
@@ -76,4 +83,12 @@ class FakeEngine:
             template = self.rng.choice(REPLIES if mentioned else RIFFS)
 
         interest = self.rng.choice(persona.interests) if persona.interests else "all of it"
-        return template.format(topic=topic, last=last, interest=interest)
+        body = template.format(topic=topic, last=last, interest=interest)
+
+        # simulate a token stream for the routed-answer path: dribble the body
+        # out word by word so `--fake` exercises streaming end to end
+        if on_delta:
+            for word in _words(body):
+                on_delta(word)
+
+        return body

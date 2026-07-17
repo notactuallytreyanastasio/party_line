@@ -16,7 +16,7 @@ import platform
 import re
 import threading
 import time
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from ..persona import Persona
 from . import transcript as tr
@@ -78,8 +78,15 @@ class Engine(Protocol):
         transcript: list[dict[str, Any]],
         cancel: asyncio.Event,
         memories: list[str] | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> str | None:
-        """One chat message in the persona's voice, or None if cancelled."""
+        """One chat message in the persona's voice, or None if cancelled.
+
+        `on_delta`, when given, is called with each run of text as it is
+        generated — used to stream a routed answer token-by-token. It may be
+        called from a worker thread, so implementations that touch an event
+        loop must marshal back to it.
+        """
         ...
 
 
@@ -153,9 +160,16 @@ class MlxEngine:
         transcript: list[dict[str, Any]],
         cancel: asyncio.Event,
         memories: list[str] | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> str | None:
         messages = tr.render_messages(persona, topic, roster_names, transcript, memories)
         stops = tr.stop_strings(roster_names)
+
+        # Stream tokens only for plain chat models. Channel models (gpt-oss
+        # harmony, gemma-4 thought) reason in a hidden channel first; their raw
+        # token stream would leak that thinking, so they answer in one shot and
+        # only the extracted final channel goes back.
+        stream_cb = on_delta if (on_delta and not self._channels) else None
 
         max_tokens = persona.max_tokens
 
@@ -179,6 +193,7 @@ class MlxEngine:
                 max_tokens=max_tokens,
                 temperature=persona.temperature,
                 cancel_check=cancel.is_set,
+                on_chunk=stream_cb,
             )
 
         if cancel.is_set():
@@ -209,6 +224,7 @@ class MlxEngine:
         max_tokens: int,
         temperature: float,
         cancel_check,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> tuple[str, int]:
         from mlx_lm import stream_generate
         from mlx_lm.sample_utils import make_repetition_penalty, make_sampler
@@ -244,6 +260,7 @@ class MlxEngine:
         ):
             if cancel_check():
                 break
+            prev_len = len(buffer)
             buffer += chunk.text
             n_tokens += 1
             # thinking-channel output legitimately mentions roster names
@@ -253,7 +270,13 @@ class MlxEngine:
                 cut = tr.scan_stops(buffer, stops)
                 if cut is not None:
                     buffer = buffer[:cut]
+                    # stream only the surviving slice of this final chunk, so a
+                    # streamed answer never shows text the stop string trimmed
+                    if on_chunk and cut > prev_len:
+                        on_chunk(buffer[prev_len:cut])
                     break
+            if on_chunk:
+                on_chunk(chunk.text)
 
         return buffer, n_tokens
 

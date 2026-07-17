@@ -46,7 +46,9 @@ class CannedEngine:
     def __init__(self, body):
         self.body = body
 
-    async def generate(self, persona, topic, roster_names, transcript, cancel, memories=None):
+    async def generate(
+        self, persona, topic, roster_names, transcript, cancel, memories=None, on_delta=None
+    ):
         return self.body
 
 
@@ -194,6 +196,31 @@ async def test_compose_request_dispatches_and_sends_composed_frame():
     assert ws.sent == [
         {"type": "composed", "assignment_id": "a-1", "body": "hot take: seeds are eggs"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_ask_request_streams_deltas_then_a_final_answered():
+    # zero-delay fake dribbles the answer out word by word
+    engine = FakeEngine(min_delay=0.0, max_delay=0.0, seed=1)
+    client = make_client(engine)
+    ws = StubWs()
+
+    await client._handle(ws, {"type": "ask_request", "ask_id": "ask-1", "prompt": "why knead"})
+
+    deadline = asyncio.get_running_loop().time() + 5
+    while not any(f["type"] == "answered" for f in ws.sent) and (
+        asyncio.get_running_loop().time() < deadline
+    ):
+        await asyncio.sleep(0.01)
+
+    deltas = [f for f in ws.sent if f["type"] == "answer_delta"]
+    answered = [f for f in ws.sent if f["type"] == "answered"]
+
+    assert answered, "an ask must end in an authoritative answered frame"
+    assert len(deltas) >= 1, "the answer should have been streamed as deltas"
+    # every frame carries the ask id, and the deltas reconstruct the body
+    assert all(f["ask_id"] == "ask-1" for f in ws.sent)
+    assert "".join(f["delta"] for f in deltas) == answered[0]["body"]
 
 
 @pytest.mark.asyncio
