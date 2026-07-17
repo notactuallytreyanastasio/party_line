@@ -1,12 +1,30 @@
 import random
 
+import pytest
+
 from party_line_harness.persona import Persona
-from party_line_harness.urge import compute_urge
+from party_line_harness.urge import ADDRESSED_ELSEWHERE_URGE, compute_urge
 
 NOVA = Persona(
     name="Nova",
     prime_directive="You are Nova.",
     interests=["raccoons", "synthesizers"],
+    chattiness=0.6,
+)
+
+# the repo convention: persona names are multi-word lowercase shitposter
+# handles — the mention parser and continuation check must handle them
+SMOOTHIE = Persona(
+    name="erowid smoothie",
+    prime_directive="You blend things.",
+    interests=["kava", "gas station supplements"],
+    chattiness=0.6,
+)
+
+HORSE = Persona(
+    name="Horse Dentist",
+    prime_directive="You look at teeth.",
+    interests=["teeth"],
     chattiness=0.6,
 )
 
@@ -71,3 +89,44 @@ def test_urge_is_clamped():
     for seed in range(30):
         u = compute_urge(chatty, t, beats_since_message=20, rng=random.Random(seed))
         assert 0.0 <= u <= 1.0
+
+
+def test_multiword_lowercase_persona_is_summoned_case_insensitively():
+    t = [msg("Bobby", "@Erowid Smoothie is this safe to drink?", mentions=["Erowid Smoothie"])]
+    assert compute_urge(SMOOTHIE, t) == 0.95
+
+
+def test_multiword_mention_addressed_elsewhere_stays_below_threshold():
+    t = [msg("Bobby", "@erowid smoothie is this safe?", mentions=["erowid smoothie"])]
+    assert compute_urge(HORSE, t) == ADDRESSED_ELSEWHERE_URGE
+    assert ADDRESSED_ELSEWHERE_URGE < SERVER_THRESHOLD
+
+
+def test_continuation_detected_for_multiword_lowercase_name():
+    warlock = Persona(name="coupon warlock", prime_directive="clip.", chattiness=0.6)
+    t = [msg("coupon warlock", "and another thing about extreme couponing", kind="bot")]
+    for seed in range(20):
+        u = compute_urge(warlock, t, rng=random.Random(seed))
+        assert 0.0 <= u < 0.6  # damped continuation, never the open-room score
+
+
+def test_pressure_grows_with_messages_since_i_spoke():
+    filler = [msg("Bobby", "hm"), msg("Priya", "yeah"), msg("Bobby", "sure"), msg("Priya", "ok")]
+    spoke_long_ago = (
+        [msg("erowid smoothie", "kombucha thoughts", kind="bot")] + filler + [msg("Bobby", "anyway")]
+    )
+    spoke_recently = [
+        msg("erowid smoothie", "kombucha thoughts", kind="bot"),
+        msg("Bobby", "anyway"),
+    ]
+    long_ago = compute_urge(SMOOTHIE, spoke_long_ago, rng=random.Random(11))
+    recent = compute_urge(SMOOTHIE, spoke_recently, rng=random.Random(11))
+    assert long_ago > recent
+
+
+def test_empty_interest_list_contributes_nothing():
+    plain = Persona(name="beige enjoyer", prime_directive="be beige.", chattiness=0.4, interests=[])
+    t = [msg("Bobby", "kava teeth raccoons everything")]
+    # chattiness*0.5 + zero overlap + msgs-since pressure (1 msg) + seeded noise
+    expected = 0.4 * 0.5 + 0.05 * 1 + random.Random(5).uniform(-0.15, 0.10)
+    assert compute_urge(plain, t, rng=random.Random(5)) == pytest.approx(expected)

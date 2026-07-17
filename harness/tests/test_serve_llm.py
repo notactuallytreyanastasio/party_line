@@ -57,6 +57,26 @@ def daemon():
         host.close()
 
 
+class _RaisingEngine:
+    async def generate(self, *args, **kwargs):
+        raise RuntimeError("engine exploded")
+
+
+@pytest.fixture
+def raising_daemon():
+    host = serve_llm.LlmHost(_RaisingEngine(), host_name="rig-7", model_id="fake", token=TOKEN)
+    httpd = serve_llm.make_server(host, bind="127.0.0.1", port=0)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        yield base
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        host.close()
+
+
 def _auth(token=TOKEN):
     return {"Authorization": f"Bearer {token}"}
 
@@ -104,11 +124,36 @@ def test_generate_bad_persona_is_400(daemon):
     assert resp.status_code == 400
 
 
+def test_generate_non_object_body_is_400(daemon):
+    resp = httpx.post(f"{daemon}/v1/generate", json=["not", "an", "object"], headers=_auth())
+    assert resp.status_code == 400
+    assert resp.json() == {"error": "body must be a JSON object"}
+
+
+def test_generate_engine_failure_is_500(raising_daemon):
+    resp = httpx.post(f"{raising_daemon}/v1/generate", json=_payload(), headers=_auth())
+    assert resp.status_code == 500
+    assert resp.json() == {"error": "generation failed"}
+
+
+def test_unknown_post_path_is_404_regardless_of_auth(daemon):
+    resp = httpx.post(f"{daemon}/v1/nope", json={})  # no auth header on purpose
+    assert resp.status_code == 404
+    assert resp.json() == {"error": "not found"}
+
+
+def test_unknown_get_path_is_404(daemon):
+    resp = httpx.get(f"{daemon}/nope", headers=_auth())
+    assert resp.status_code == 404
+    assert resp.json() == {"error": "not found"}
+
+
 # ── catalog protocol ────────────────────────────────────────────────────────
 
 
 class _CatalogHandler(BaseHTTPRequestHandler):
     calls: list[dict] = []
+    fail_heartbeat: bool = False
 
     def log_message(self, *args):
         pass
@@ -139,6 +184,8 @@ class _CatalogHandler(BaseHTTPRequestHandler):
         self._record("POST")
         if self.path == "/api/hosts/register":
             self._send(201, {"data": {"id": "host-42", "ttl_seconds": 30}})
+        elif type(self).fail_heartbeat:
+            self._send(500, {"error": "boom"})
         else:  # heartbeat
             self._send(200, {"data": {"ok": True}})
 
@@ -150,6 +197,7 @@ class _CatalogHandler(BaseHTTPRequestHandler):
 @pytest.fixture
 def catalog_stub():
     _CatalogHandler.calls = []
+    _CatalogHandler.fail_heartbeat = False
     server = ThreadingHTTPServer(("127.0.0.1", 0), _CatalogHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -204,6 +252,68 @@ def test_catalog_unreachable_server_never_raises():
     assert cat.register() is False
     assert cat.heartbeat() is False  # host_id still None → tries register → False
     cat.deregister()  # no-op, no raise
+
+
+def test_heartbeat_500_clears_host_id_then_next_heartbeat_reregisters(catalog_stub):
+    cat = serve_llm.Catalog(catalog_stub, name="rig-7", url="https://x", model="fake")
+    assert cat.register() is True
+
+    _CatalogHandler.fail_heartbeat = True
+    assert cat.heartbeat() is False
+    assert cat.host_id is None  # forgotten: the next interval must re-register
+
+    _CatalogHandler.fail_heartbeat = False
+    assert cat.heartbeat() is True
+    assert cat.host_id == "host-42"
+
+    assert [(c["method"], c["path"]) for c in _CatalogHandler.calls] == [
+        ("POST", "/api/hosts/register"),
+        ("POST", "/api/hosts/host-42/heartbeat"),
+        ("POST", "/api/hosts/register"),
+    ]
+
+
+# ── heartbeat loop (scripted stop event: zero wall-clock waiting) ────────────
+
+
+class _ScriptedStop:
+    """Duck-typed stop event: times out `beats` times, then reads as set."""
+
+    def __init__(self, beats: int):
+        self.beats = beats
+        self.intervals: list[float] = []
+
+    def is_set(self) -> bool:
+        return len(self.intervals) > self.beats
+
+    def wait(self, interval: float) -> bool:
+        self.intervals.append(interval)
+        return len(self.intervals) > self.beats
+
+
+class _CountingCatalog:
+    def __init__(self, ttl_seconds: int):
+        self.ttl_seconds = ttl_seconds
+        self.beats = 0
+
+    def heartbeat(self) -> bool:
+        self.beats += 1
+        return True
+
+
+def test_heartbeat_loop_paces_at_a_third_of_ttl_and_stops():
+    stop = _ScriptedStop(beats=2)
+    catalog = _CountingCatalog(ttl_seconds=30)
+    serve_llm._heartbeat_loop(catalog, stop)  # returns as soon as stop fires
+    assert catalog.beats == 2
+    assert stop.intervals == [10.0, 10.0, 10.0]
+
+
+def test_heartbeat_loop_floors_the_interval_at_one_second():
+    stop = _ScriptedStop(beats=1)
+    catalog = _CountingCatalog(ttl_seconds=1)
+    serve_llm._heartbeat_loop(catalog, stop)
+    assert stop.intervals == [1.0, 1.0]
 
 
 # ── tailscale (no real tailscale invoked) ───────────────────────────────────
@@ -263,3 +373,58 @@ def test_resolve_public_url_respects_no_tailscale(monkeypatch):
     assert url == "http://127.0.0.1:9000"
     assert used is False
     assert called is False  # never shells out to tailscale
+
+
+def test_start_tailscale_returns_none_on_nonzero_exit(monkeypatch):
+    monkeypatch.setattr(serve_llm.shutil, "which", lambda _: "/usr/bin/tailscale")
+    monkeypatch.setattr(
+        serve_llm.subprocess,
+        "run",
+        lambda *a, **k: _FakeProc("", returncode=1, stderr="serve broke"),
+    )
+    assert serve_llm.start_tailscale(8377) is None
+
+
+def test_start_tailscale_returns_none_when_dns_name_empty(monkeypatch):
+    status = {"Self": {"DNSName": ""}}
+
+    def fake_run(cmd, *a, **k):
+        if "status" in cmd:
+            return _FakeProc(json.dumps(status))
+        return _FakeProc("")  # serve --bg succeeds
+
+    monkeypatch.setattr(serve_llm.shutil, "which", lambda _: "/usr/bin/tailscale")
+    monkeypatch.setattr(serve_llm.subprocess, "run", fake_run)
+    assert serve_llm.start_tailscale(8377) is None
+
+
+# ── LlmHost.warmup ──────────────────────────────────────────────────────────
+
+
+class _WarmableEngine:
+    async def warmup(self):
+        return 42.5
+
+    async def generate(self, *args, **kwargs):  # pragma: no cover - unused
+        return "unused"
+
+
+def test_warmup_is_none_when_engine_has_no_warmup():
+    host = serve_llm.LlmHost(
+        FakeEngine(min_delay=0.0, max_delay=0.0, seed=1),
+        host_name="rig-7",
+        model_id="fake",
+        token=TOKEN,
+    )
+    try:
+        assert host.warmup() is None
+    finally:
+        host.close()
+
+
+def test_warmup_forwards_the_engine_result():
+    host = serve_llm.LlmHost(_WarmableEngine(), host_name="rig-7", model_id="fake", token=TOKEN)
+    try:
+        assert host.warmup() == 42.5
+    finally:
+        host.close()
