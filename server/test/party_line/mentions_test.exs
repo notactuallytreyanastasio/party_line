@@ -64,4 +64,26 @@ defmodule PartyLine.MentionsTest do
   test "hyphenated over-capture still finds the prefix name" do
     assert [%{name: "Nova"}] = Mentions.parse("@nova-wait no", @roster)
   end
+
+  test "a mention at the exact end of the body matches" do
+    assert [%{name: "erowid smoothie"}] =
+             Mentions.parse("summon @erowid smoothie", @shitposters)
+  end
+
+  test "a letter continuing the name at the end of the body blocks the match" do
+    assert [] = Mentions.parse("summon @erowid smoothies", @shitposters)
+  end
+
+  test "a bare or trailing @ yields nothing" do
+    assert [] = Mentions.parse("@", @roster)
+    assert [] = Mentions.parse("ping me @", @roster)
+  end
+
+  test "an empty roster yields nothing for any body with an @" do
+    assert [] = Mentions.parse("hey @nova and @erowid smoothie", [])
+  end
+
+  test "adjacent mentions separated only by @ both resolve without over-capture" do
+    assert [%{name: "Nov"}, %{name: "Nova"}] = Mentions.parse("@Nov@Nova", @roster)
+  end
 end

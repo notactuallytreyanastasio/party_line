@@ -116,5 +116,45 @@ defmodule PartyLine.HostsTest do
       {:ok, _} = Hosts.register(h, Map.delete(@valid, :requires_token))
       assert [%{requires_token: false}] = Hosts.list(h)
     end
+
+    test "accepts a fully string-keyed attrs map (the JSON params path)" do
+      h = start(ttl: 60_000)
+
+      attrs = %{
+        "name" => "gpu-closet",
+        "url" => "http://gpu-closet.tailnet.ts.net:8080",
+        "model" => "qwen2.5-coder-7b",
+        "requires_token" => "true"
+      }
+
+      assert {:ok, %{id: _}} = Hosts.register(h, attrs)
+      assert [%{name: "gpu-closet", requires_token: true}] = Hosts.list(h)
+    end
+
+    test "requires_token is false for any value other than true" do
+      h = start(ttl: 60_000)
+
+      {:ok, _} = Hosts.register(h, %{@valid | name: "a", requires_token: false})
+      {:ok, _} = Hosts.register(h, %{@valid | name: "b", requires_token: "false"})
+      {:ok, _} = Hosts.register(h, %{@valid | name: "c", requires_token: 1})
+
+      hosts = Hosts.list(h)
+      assert Enum.map(hosts, & &1.name) == ["a", "b", "c"]
+      assert Enum.all?(hosts, &(&1.requires_token == false))
+    end
+
+    test "rejects a non-binary name and a non-binary model" do
+      h = start()
+      assert {:error, :invalid_name} = Hosts.register(h, %{@valid | name: 42})
+      assert {:error, :invalid_model} = Hosts.register(h, %{@valid | model: nil})
+    end
+  end
+
+  test "list returns hosts sorted by name" do
+    h = start(ttl: 60_000)
+    {:ok, _} = Hosts.register(h, %{@valid | name: "zebra-rack"})
+    {:ok, _} = Hosts.register(h, %{@valid | name: "attic-mini"})
+
+    assert h |> Hosts.list() |> Enum.map(& &1.name) == ["attic-mini", "zebra-rack"]
   end
 end

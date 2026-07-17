@@ -1,7 +1,32 @@
 defmodule PartyLine.ATProtoTest do
   use ExUnit.Case, async: true
 
-  alias PartyLine.ATProto.{Client, Sessions}
+  alias PartyLine.ATProto.{Client, Identity, Sessions}
+
+  # A one-response Bandit stub for the identity HTTP plumbing: it answers
+  # every request with a fixed (status, content-type, body) triple.
+  defmodule MetaStub do
+    import Plug.Conn
+
+    def init(opts), do: opts
+
+    def call(conn, opts) do
+      {status, content_type, body} = Keyword.fetch!(opts, :response)
+
+      conn
+      |> put_resp_content_type(content_type)
+      |> send_resp(status, body)
+    end
+  end
+
+  defp serve(response) do
+    {:ok, srv} =
+      Bandit.start_link(plug: {MetaStub, response: response}, port: 0, startup_log: false)
+
+    on_exit(fn -> if Process.alive?(srv), do: Process.exit(srv, :normal) end)
+    {:ok, {_addr, port}} = ThousandIsland.listener_info(srv)
+    "http://127.0.0.1:#{port}"
+  end
 
   describe "client metadata" do
     test "is a valid public-client document" do
@@ -42,6 +67,41 @@ defmodule PartyLine.ATProtoTest do
       key = DPoP.generate_key()
       assert Enum.all?(Map.keys(key), &is_binary/1)
       assert {:ok, _} = Jason.encode(key)
+    end
+  end
+
+  describe "identity" do
+    test "auth_server_metadata/1 decodes a 200 JSON metadata document" do
+      meta = %{
+        "issuer" => "https://auth.example",
+        "token_endpoint" => "https://auth.example/oauth/token"
+      }
+
+      auth_server = serve({200, "application/json", Jason.encode!(meta)})
+
+      assert {:ok, ^meta} = Identity.auth_server_metadata(auth_server)
+    end
+
+    test "auth_server_metadata/1 surfaces a non-200 as {:http, status}" do
+      auth_server = serve({404, "application/json", "{}"})
+
+      assert {:error, {:http, 404}} = Identity.auth_server_metadata(auth_server)
+    end
+
+    test "auth_server_metadata/1 rejects a 200 with a non-JSON body" do
+      auth_server = serve({200, "text/plain", "definitely not json"})
+
+      assert {:error, :bad_json} = Identity.auth_server_metadata(auth_server)
+    end
+
+    test "resolve/1 rejects unsupported DID methods without any HTTP" do
+      assert {:error, :unsupported_did} = Identity.resolve("did:key:zabc")
+    end
+
+    test "resolve/1 trims surrounding whitespace before dispatching" do
+      # if the trim regressed, this would take the handle path (HTTP) instead
+      # of hitting the pure unsupported-DID clause
+      assert {:error, :unsupported_did} = Identity.resolve("  did:key:zabc  ")
     end
   end
 

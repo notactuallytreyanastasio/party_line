@@ -24,7 +24,13 @@ defmodule PartyLine.Memory.IngestTest do
         %{s | calls: s.calls ++ [%{method: conn.method, path: conn.request_path, body: body}]}
       end)
 
-      case Agent.get(agent, & &1.status) do
+      status =
+        Agent.get_and_update(agent, fn
+          %{plan: [next | rest]} = s -> {next, %{s | plan: rest}}
+          s -> {s.status, s}
+        end)
+
+      case status do
         200 -> ok(conn, agent)
         status -> error(conn, status)
       end
@@ -62,7 +68,7 @@ defmodule PartyLine.Memory.IngestTest do
   # ── Fixtures ───────────────────────────────────────────────────────────────
 
   defp start_stub(status \\ 200) do
-    {:ok, agent} = Agent.start_link(fn -> %{calls: [], seq: 0, status: status} end)
+    {:ok, agent} = Agent.start_link(fn -> %{calls: [], seq: 0, status: status, plan: []} end)
     {:ok, srv} = Bandit.start_link(plug: {Stub, agent: agent}, port: 0, startup_log: false)
     on_exit(fn -> if Process.alive?(srv), do: Process.exit(srv, :normal) end)
     {:ok, {_addr, port}} = ThousandIsland.listener_info(srv)
@@ -98,6 +104,9 @@ defmodule PartyLine.Memory.IngestTest do
   end
 
   defp sync(ingest), do: GenServer.call(ingest, :sync)
+
+  # Queue per-request statuses; once exhausted the stub falls back to :status.
+  defp plan(agent, statuses), do: Agent.update(agent, fn s -> %{s | plan: statuses} end)
 
   # ── Tests ──────────────────────────────────────────────────────────────────
 
@@ -222,5 +231,120 @@ defmodule PartyLine.Memory.IngestTest do
 
     assert Process.alive?(ingest)
     assert calls_to(agent, "/tools/add_node") != []
+  end
+
+  test "(f) the follows chain skips a dropped message and rejoins at the next success" do
+    {agent, url} = start_stub()
+    ingest = start_ingest(url)
+
+    Ingest.record_message(ingest, "room-1", msg(1, "Ada", "first"))
+    sync(ingest)
+
+    # daemon hiccup: the second message is dropped
+    Agent.update(agent, fn s -> %{s | status: 500} end)
+    Ingest.record_message(ingest, "room-1", msg(2, "Bo", "lost to the void"))
+    sync(ingest)
+
+    # daemon recovers: the third message must chain onto the FIRST, not the drop
+    Agent.update(agent, fn s -> %{s | status: 200} end)
+    Ingest.record_message(ingest, "room-1", msg(3, "Cy", "third"))
+    sync(ingest)
+
+    # node ids: msg1 -> 1, msg2 dropped (no id assigned), msg3 -> 2
+    assert [%{body: %{"from_id" => 1, "to_id" => 2, "rationale" => "follows"}}] =
+             calls_to(agent, "/tools/link_nodes")
+  end
+
+  test "(g) a failure mid-mentions drops the remaining mentions but not the pipeline" do
+    {agent, url} = start_stub()
+    ingest = start_ingest(url)
+
+    mentions = [
+      %{participant_id: "p-2", name: "horse dentist", kind: :bot},
+      %{participant_id: "p-3", name: "erowid smoothie", kind: :bot}
+    ]
+
+    # requests: PUT graph, add message node, add participant 1, link mentions (FAILS)
+    plan(agent, [200, 200, 200, 500])
+
+    Ingest.record_message(
+      ingest,
+      "room-1",
+      msg(1, "Ada", "hi @horse dentist and @erowid smoothie", mentions)
+    )
+
+    sync(ingest)
+    assert Process.alive?(ingest)
+
+    # the second mention was dropped: its participant node is never even attempted
+    participant_adds =
+      agent
+      |> calls_to("/tools/add_node")
+      |> Enum.filter(&String.starts_with?(&1.body["title"], "participant:"))
+
+    assert Enum.map(participant_adds, & &1.body["title"]) == ["participant: horse dentist (bot)"]
+
+    # the pipeline is intact: the next message ingests and chains onto message 1
+    Ingest.record_message(ingest, "room-1", msg(2, "Bo", "second"))
+    sync(ingest)
+
+    follows =
+      agent
+      |> calls_to("/tools/link_nodes")
+      |> Enum.filter(&(&1.body["rationale"] == "follows"))
+
+    # node ids: msg1 -> 1, participant -> 2, msg2 -> 3
+    assert Enum.map(follows, &{&1.body["from_id"], &1.body["to_id"]}) == [{1, 3}]
+  end
+
+  test "(h) multi-word lowercase persona names flow through intact" do
+    {agent, url} = start_stub()
+    ingest = start_ingest(url)
+
+    Ingest.record_message(
+      ingest,
+      "room-1",
+      msg(1, "erowid smoothie", "the tea is kicking in", [
+        %{participant_id: "p-2", name: "horse dentist", kind: :bot}
+      ])
+    )
+
+    sync(ingest)
+
+    titles = agent |> calls_to("/tools/add_node") |> Enum.map(& &1.body["title"])
+    assert "erowid smoothie: the tea is kicking in" in titles
+    assert "participant: horse dentist (bot)" in titles
+  end
+
+  test "(i) long bodies are truncated in the title but carried whole in the description" do
+    {agent, url} = start_stub()
+    ingest = start_ingest(url)
+
+    body = String.duplicate("a", 150)
+    Ingest.record_message(ingest, "room-1", msg(1, "Ada", body))
+    sync(ingest)
+
+    assert [add] = calls_to(agent, "/tools/add_node")
+    assert add.body["title"] == "Ada: " <> String.duplicate("a", 100)
+    assert add.body["description"] == body
+  end
+
+  test "(j) missing sender and participant names fall back to ?" do
+    {agent, url} = start_stub()
+    ingest = start_ingest(url)
+
+    Ingest.record_message(ingest, "room-1", %{body: "who said that"})
+    Ingest.record_presence(ingest, "room-1", :joined, %{participant_id: "p-9"})
+    sync(ingest)
+
+    titles = agent |> calls_to("/tools/add_node") |> Enum.map(& &1.body["title"])
+    assert titles == ["?: who said that", "presence: joined ?"]
+  end
+
+  test "(k) record_* against a never-started server returns :ok without crashing" do
+    assert :ok = Ingest.record_message(:never_started_ingest, "room-1", msg(1, "Ada", "hi"))
+
+    assert :ok =
+             Ingest.record_presence(:never_started_ingest, "room-1", :joined, %{name: "Ada"})
   end
 end

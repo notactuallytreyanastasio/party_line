@@ -32,10 +32,11 @@ defmodule PartyLineWeb.BotSocketTest do
       %__MODULE__{conn: conn, ref: ref, websocket: websocket}
     end
 
-    def send!(ws, payload) do
-      {:ok, websocket, data} =
-        Mint.WebSocket.encode(ws.websocket, {:text, Jason.encode!(payload)})
+    def send!(ws, payload), do: send_raw!(ws, Jason.encode!(payload))
 
+    @doc "Send a text frame as-is — for exercising the non-JSON error path."
+    def send_raw!(ws, text) do
+      {:ok, websocket, data} = Mint.WebSocket.encode(ws.websocket, {:text, text})
       {:ok, conn} = Mint.WebSocket.stream_request_body(ws.conn, ws.ref, data)
       %{ws | conn: conn, websocket: websocket}
     end
@@ -187,5 +188,116 @@ defmodule PartyLineWeb.BotSocketTest do
     ws = WS.send!(ws, %{type: "speak", body: "hi"})
     {error, _} = WS.recv!(ws, type("error"))
     assert error["code"] == "not_joined"
+  end
+
+  test "boards compose loop: the persona's host gets a compose_request frame" do
+    room_id = fresh_room()
+    {_welcome, ws} = join!("erowid smoothie", "bot", room_id)
+
+    assignment = %{
+      id: "assign-#{System.unique_integer([:positive])}",
+      board: "confessions",
+      topic: "socket compose topic"
+    }
+
+    :ok = PartyLine.Bots.request_compose("erowid smoothie", assignment)
+
+    {frame, ws} = WS.recv!(ws, type("compose_request"))
+    assert frame["assignment_id"] == assignment.id
+    assert frame["board"] == "confessions"
+    assert frame["topic"] == "socket compose topic"
+
+    # a well-formed composed frame is accepted silently (Scheduler.deliver
+    # is a cast), so the next error on the line belongs to the probe below
+    ws = WS.send!(ws, %{type: "composed", assignment_id: assignment.id, body: "a board post"})
+    ws = WS.send!(ws, %{type: "definitely-not-a-type"})
+    {error, _} = WS.recv!(ws, type("error"))
+    assert error["code"] == "unknown_type"
+  end
+
+  test "composed frames missing assignment_id or body are rejected" do
+    room_id = fresh_room()
+    {_welcome, ws} = join!("laminated owl", "bot", room_id)
+
+    ws = WS.send!(ws, %{type: "composed", assignment_id: "a-1"})
+    {no_body, ws} = WS.recv!(ws, type("error"))
+    assert no_body["code"] == "bad_message"
+
+    ws = WS.send!(ws, %{type: "composed", body: "words with no assignment"})
+    {no_id, _} = WS.recv!(ws, type("error"))
+    assert no_id["code"] == "bad_message"
+  end
+
+  test "join twice is already_joined; bad kind and missing name are join_failed" do
+    room_id = fresh_room()
+    {_welcome, ws} = join!("Nova", "bot", room_id)
+
+    ws = WS.send!(ws, %{type: "join", name: "Nova", kind: "bot", room_id: room_id})
+    {twice, _} = WS.recv!(ws, type("error"))
+    assert twice["code"] == "already_joined"
+
+    ws2 = WS.connect!("/ws/bot/websocket")
+    ws2 = WS.send!(ws2, %{type: "join", name: "Gerb", kind: "gerbil", room_id: room_id})
+    {bad_kind, ws2} = WS.recv!(ws2, type("error"))
+    assert bad_kind["code"] == "join_failed"
+    assert bad_kind["detail"] == "kind must be bot or human"
+
+    ws2 = WS.send!(ws2, %{type: "join", kind: "human", room_id: room_id})
+    {no_name, _} = WS.recv!(ws2, type("error"))
+    assert no_name["code"] == "join_failed"
+    assert no_name["detail"] == "missing name"
+  end
+
+  test "malformed frames get typed errors" do
+    room_id = fresh_room()
+    {_welcome, ws} = join!("Nova", "bot", room_id)
+
+    ws = WS.send_raw!(ws, "{not json")
+    {not_json, ws} = WS.recv!(ws, type("error"))
+    assert not_json["code"] == "bad_message"
+
+    ws = WS.send!(ws, %{type: "warble"})
+    {unknown, ws} = WS.recv!(ws, type("error"))
+    assert unknown["code"] == "unknown_type"
+
+    ws = WS.send!(ws, %{type: "bid", beat_id: "b-1"})
+    {no_urge, ws} = WS.recv!(ws, type("error"))
+    assert no_urge["code"] == "bad_message"
+
+    ws = WS.send!(ws, %{type: "bid", urge: 0.5})
+    {no_beat, ws} = WS.recv!(ws, type("error"))
+    assert no_beat["code"] == "bad_message"
+
+    ws = WS.send!(ws, %{type: "speak"})
+    {no_body, _} = WS.recv!(ws, type("error"))
+    assert no_body["code"] == "bad_message"
+  end
+
+  test "leave broadcasts presence left to the rest of the line" do
+    room_id = fresh_room()
+    {_welcome, stayer} = join!("Nova", "bot", room_id)
+    {_welcome2, leaver} = join!("Bobby", "human", room_id)
+
+    {joined, stayer} =
+      WS.recv!(stayer, fn f -> f["type"] == "presence" and f["event"] == "joined" end)
+
+    assert joined["participant"]["name"] == "Bobby"
+
+    _leaver = WS.send!(leaver, %{type: "leave"})
+
+    {left, _} = WS.recv!(stayer, fn f -> f["type"] == "presence" and f["event"] == "left" end)
+    assert left["participant"]["name"] == "Bobby"
+  end
+
+  test "multi-word lowercase mentions are parsed and delivered structured" do
+    room_id = fresh_room()
+    {_welcome, bot} = join!("gas station sushi", "bot", room_id)
+    {_welcome2, human} = join!("Bobby", "human", room_id)
+
+    _human = WS.send!(human, %{type: "speak", body: "@gas station sushi you up?"})
+
+    {message, _} = WS.recv!(bot, type("message"))
+    assert message["body"] == "@gas station sushi you up?"
+    assert [%{"name" => "gas station sushi", "kind" => "bot"}] = message["mentions"]
   end
 end

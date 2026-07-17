@@ -255,4 +255,136 @@ defmodule PartyLine.Rooms.RoomTest do
     assert new_beat != beat
     _ = b
   end
+
+  test "multi-word lowercase handles round-trip presence, roster, and mentions" do
+    room = start_room()
+    {h, _} = join(room, :h, %{name: "Bobby", kind: :human})
+    {_e, _} = join(room, :e, %{name: "erowid smoothie", kind: :bot})
+
+    # presence carries the multi-word name intact
+    assert_receive {:h,
+                    %{
+                      type: :presence,
+                      event: :joined,
+                      participant: %{name: "erowid smoothie", kind: :bot}
+                    }},
+                   1_000
+
+    # a human @-mention of the multi-word handle parses through commit_message
+    Room.speak(room, h, nil, "@erowid smoothie what do you think?")
+
+    assert_receive {:e,
+                    %{
+                      type: :message,
+                      body: "@erowid smoothie what do you think?",
+                      mentions: [%{name: "erowid smoothie", kind: :bot}]
+                    }},
+                   1_000
+
+    # a later joiner's welcome roster round-trips the name too
+    pid = spawn_link(fn -> Process.sleep(:infinity) end)
+    {:ok, welcome} = Room.join(room, %{name: "late caller", kind: :human, pid: pid})
+    assert Enum.any?(welcome.roster, &(&1.name == "erowid smoothie" and &1.kind == :bot))
+  end
+
+  test "leave/2 broadcasts :left and removes the participant from snapshots" do
+    room = start_room()
+    {e, _} = join(room, :e, %{name: "erowid smoothie", kind: :bot})
+    {_d, _} = join(room, :d, %{name: "horse dentist", kind: :bot})
+
+    Room.leave(room, e)
+
+    assert_receive {:d,
+                    %{type: :presence, event: :left, participant: %{name: "erowid smoothie"}}},
+                   1_000
+
+    refute Enum.any?(Room.snapshot(room).roster, &(&1.name == "erowid smoothie"))
+  end
+
+  test "the last bot leaving via leave/2 idles the director until a bot rejoins" do
+    room = start_room()
+    {e, _} = join(room, :e, %{name: "erowid smoothie", kind: :bot})
+    await_beat(:e)
+
+    Room.leave(room, e)
+    assert Room.snapshot(room).phase == :idle
+    refute_receive {:e, %{type: :beat}}, 150
+
+    # a fresh bot wakes the director again
+    {_d, _} = join(room, :d, %{name: "horse dentist", kind: :bot})
+    await_beat(:d)
+  end
+
+  test "a grant-holder leaving via leave/2 re-opens bidding for the rest" do
+    room = start_room()
+    {e, _} = join(room, :e, %{name: "erowid smoothie", kind: :bot})
+    {_d, _} = join(room, :d, %{name: "horse dentist", kind: :bot})
+
+    beat = await_beat(:e)
+    assert_receive {:d, %{type: :beat, beat_id: ^beat}}, 1_000
+    Room.bid(room, e, beat, 0.9)
+    assert_receive {:e, %{type: :grant}}, 1_000
+
+    Room.leave(room, e)
+
+    assert_receive {:d,
+                    %{type: :presence, event: :left, participant: %{name: "erowid smoothie"}}},
+                   1_000
+
+    assert_receive {:d, %{type: :beat, beat_id: new_beat}}, 1_000
+    assert new_beat != beat
+  end
+
+  test "announce/2 rejects unknown ids and is a quiet no-op for the already-visible" do
+    room = start_room()
+    {_e, _} = join(room, :e, %{name: "erowid smoothie", kind: :bot})
+    {h, _} = join(room, :h, %{name: "Bobby", kind: :human})
+
+    assert {:error, :unknown_participant} = Room.announce(room, "p-999")
+
+    # announcing someone already visible succeeds without a duplicate broadcast
+    assert :ok = Room.announce(room, h)
+    refute_receive {:e, %{type: :presence, event: :announced}}, 50
+  end
+
+  test "an over-eager urge clamps to 1.0 and still wins the beat" do
+    room = start_room()
+    {e, _} = join(room, :e, %{name: "erowid smoothie", kind: :bot})
+    {d, _} = join(room, :d, %{name: "horse dentist", kind: :bot})
+
+    beat = await_beat(:e)
+    assert_receive {:d, %{type: :beat, beat_id: ^beat}}, 1_000
+    Room.bid(room, e, beat, 5.0)
+    Room.bid(room, d, beat, 0.9)
+
+    assert_receive {:e, %{type: :grant}}, 1_000
+    refute_receive {:d, %{type: :grant}}, 20
+  end
+
+  test "a non-numeric urge clamps to zero and loses to any real bid" do
+    room = start_room()
+    {e, _} = join(room, :e, %{name: "erowid smoothie", kind: :bot})
+    {d, _} = join(room, :d, %{name: "horse dentist", kind: :bot})
+
+    beat = await_beat(:e)
+    assert_receive {:d, %{type: :beat, beat_id: ^beat}}, 1_000
+
+    # a misbehaving socket reports its urge as a string — clamp/1 is the
+    # room's only defense at the wire boundary
+    Room.bid(room, e, beat, "high")
+    Room.bid(room, d, beat, 0.4)
+
+    assert_receive {:d, %{type: :grant}}, 1_000
+    refute_receive {:e, %{type: :grant}}, 20
+  end
+
+  test "a bid against a stale beat id is ignored" do
+    room = start_room()
+    {e, _} = join(room, :e, %{name: "erowid smoothie", kind: :bot})
+
+    beat = await_beat(:e)
+    Room.bid(room, e, "#{beat}-stale", 0.9)
+
+    refute_receive {:e, %{type: :grant}}, 150
+  end
 end
