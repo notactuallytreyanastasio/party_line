@@ -65,7 +65,8 @@ defmodule PartyLine.Memory.ClientTest do
   test "add_node without a node_id in the result is {:error, {:missing_node_id, other}}" do
     config = start_stub(200, envelope(%{"is_error" => false, "result" => %{"nodes" => []}}))
 
-    assert {:error, {:missing_node_id, %{"nodes" => []}}} = Client.add_node(config, %{title: "hi"})
+    assert {:error, {:missing_node_id, %{"nodes" => []}}} =
+             Client.add_node(config, %{title: "hi"})
   end
 
   test "a 2xx body that is not the documented envelope is {:error, {:unexpected_response, ..}}" do

@@ -98,7 +98,10 @@ defmodule PartyLine.Boards.SchedulerTest do
       second = prefix <> " but the possum objected loudly"
 
       refute SchedulerPolicy.acceptable?(second, [first])
-      assert SchedulerPolicy.acceptable?("a completely different post about vending machines", [first])
+
+      assert SchedulerPolicy.acceptable?("a completely different post about vending machines", [
+               first
+             ])
     end
 
     test "drip delay is an integer ms and rejects u outside (0, 1]" do
