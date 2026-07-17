@@ -61,22 +61,22 @@ def parse_remembers(text: str) -> tuple[str, list[str]]:
         return "", []
 
     notes: list[str] = []
-    matched = False
 
     for match in _TAG.finditer(text):
-        matched = True
         note = " ".join(match.group(1).split())
         if _MIN_NOTE <= len(note) <= _MAX_NOTE:
             notes.append(note)
 
     message = _TAG.sub("", text)
 
-    # No well-formed tag but a stray "</remember>" left behind: strip it so it
-    # can't leak. The note is unrecoverable — a small model that emits only the
-    # closing tag has thrown away where the note started — so this trades a
-    # missed memory for a clean chat, which is the right way to fail.
-    if not matched:
-        message = _ORPHAN_CLOSE.sub("", message)
+    # Strip any stray "</remember>" left behind — ALWAYS, not only when no
+    # well-formed tag matched. A message can carry both a good tag and a lone
+    # closer ("...<remember>real note</remember> ...trailing thought</remember>"),
+    # and gating this on "no match" let the orphan leak into the room in exactly
+    # that case. Well-formed tags are already gone by here, so this only removes
+    # leftover orphans; its note is unrecoverable and dropped, which is the right
+    # way to fail — a clean chat over a saved memory.
+    message = _ORPHAN_CLOSE.sub("", message)
 
     # collapse the hole the tag left behind
     message = re.sub(r"[ \t]{2,}", " ", message).strip()

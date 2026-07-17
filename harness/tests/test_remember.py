@@ -57,6 +57,19 @@ class TestWhenTheModelManglesIt:
         assert message.endswith("understanding")
         assert notes == []
 
+
+    def test_an_orphan_close_alongside_a_wellformed_tag_still_strips(self):
+        # The leak the review found: a message with BOTH a good tag and a stray
+        # closer. Orphan-stripping used to be skipped once any tag matched, so
+        # the second </remember> leaked into the room.
+        raw = (
+            "the molars knew <remember>the molars bit is canon</remember> "
+            "and also some trailing thought</remember>"
+        )
+        message, notes = parse_remembers(raw)
+        assert "remember" not in message.lower(), "an orphan tag must never reach the room"
+        assert notes == ["the molars bit is canon"]
+
     def test_a_closing_tag_without_the_slash_still_strips(self):
         message, notes = parse_remembers("said it <remember>the bit is canon<remember>")
         assert "remember" not in message
