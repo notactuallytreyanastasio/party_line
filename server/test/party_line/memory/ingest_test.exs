@@ -119,8 +119,10 @@ defmodule PartyLine.Memory.IngestTest do
     Ingest.record_message(ingest, "room-1", msg(3, "Cy", "third"))
     sync(ingest)
 
-    # graph ensured exactly once
-    assert length(calls_to(agent, "/graphs/party-line-root")) == 1
+    # the room's own graph, ensured exactly once — a room is a conversation
+    # with its own thread of what happened, so it gets its own graph
+    assert length(calls_to(agent, "/graphs/room-1")) == 1
+    assert calls_to(agent, "/graphs/party-line-root") == []
 
     adds = calls_to(agent, "/tools/add_node")
     assert length(adds) == 3
@@ -346,5 +348,47 @@ defmodule PartyLine.Memory.IngestTest do
 
     assert :ok =
              Ingest.record_presence(:never_started_ingest, "room-1", :joined, %{name: "Ada"})
+  end
+
+  test "each room gets its own graph, and one room's outage doesn't touch another" do
+    {agent, url} = start_stub()
+    ingest = start_ingest(url)
+
+    Ingest.record_message(ingest, "room-alpha", msg(1, "Ada", "in alpha"))
+    Ingest.record_message(ingest, "room-beta", msg(1, "Bo", "in beta"))
+    sync(ingest)
+
+    assert length(calls_to(agent, "/graphs/room-alpha")) == 1
+    assert length(calls_to(agent, "/graphs/room-beta")) == 1
+
+    adds = calls_to(agent, "/tools/add_node")
+    assert length(adds) == 2
+    # every write went to its own room's graph
+    assert Enum.any?(adds, &String.contains?(&1.path, "/graphs/room-alpha/"))
+    assert Enum.any?(adds, &String.contains?(&1.path, "/graphs/room-beta/"))
+  end
+
+  test "a vanished graph is re-created rather than dropping every event forever" do
+    {agent, url} = start_stub()
+    ingest = start_ingest(url)
+
+    Ingest.record_message(ingest, "room-1", msg(1, "Ada", "before"))
+    sync(ingest)
+    assert length(calls_to(agent, "/graphs/room-1")) == 1
+
+    # the daemon loses the graph out from under us (data wiped, cache/disk
+    # disagreeing — exactly what happened in dev)
+    plan(agent, [404])
+    Ingest.record_message(ingest, "room-1", msg(2, "Bo", "vanishes"))
+    sync(ingest)
+
+    # the next event must re-ensure instead of latching onto a grave
+    Ingest.record_message(ingest, "room-1", msg(3, "Cy", "after"))
+    sync(ingest)
+
+    assert length(calls_to(agent, "/graphs/room-1")) == 2,
+           "a 404 must un-latch `ensured`, or memory dies silently for the life of the server"
+
+    assert Enum.any?(calls_to(agent, "/tools/add_node"), &(&1.body["title"] == "Cy: after"))
   end
 end
