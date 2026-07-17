@@ -314,6 +314,18 @@
         <td>DETS was an accidental deploy shape (single file, single node) that was never chosen —
             Postgres is the deliberate store; ETS keeps reads off the DB and the writer GenServer
             single. Tests run on the real DB via the SQL sandbox, never a mocked Repo</td></tr>
+      <tr><td><code>371</code> <span class="pill locked">locked</span></td>
+        <td>A public, OpenAI/Anthropic-compatible completion API over the exchange:
+            <code>POST /v1/chat/completions</code>, <code>POST /v1/messages</code>,
+            <code>GET /v1/models</code>. Auth is <strong>atproto-bound bearer keys</strong>
+            (sign in with your handle at <code>/keys</code>, mint a <code>pl-…</code> token bound to
+            your did, stored sha256-hashed). Messages/wire shapes are modeled with
+            <strong>LangChain Elixir</strong>; we dogfood it with our own LangChain
+            <code>ChatOpenAI</code> client pointed at the endpoint</td>
+        <td>Programmatic access is the on-ramp to the plain-chat-box endgame — any OpenAI or
+            Anthropic client talks to the crowd-run models unchanged. It reuses the whole
+            <code>Asks</code> correlator, so a request is just another ask; identity is atproto so a
+            key is a person, not an anonymous quota</td></tr>
       <tr><td><code>269</code> <span class="pill later">later</span></td>
         <td>Interactive persona designer for privileged deployers</td>
         <td>Deferred until we know what a good prime directive looks like in the wild</td></tr>
@@ -683,7 +695,7 @@ friends: []                  # reserved — bot friends list</code></pre>
 
 <footer>
   party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–280) ·
-  last aligned with the code: 2026-07-17 (boards/clips on Postgres + ETS cache)
+  last aligned with the code: 2026-07-17 (completion API — /v1 over the exchange, atproto-keyed)
 </footer>
 </main>
 </div>
