@@ -8,6 +8,7 @@ defmodule PartyLineWeb.Router do
     plug :put_root_layout, html: {PartyLineWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug PartyLineWeb.Plugs.Voter
   end
 
   pipeline :api do
@@ -20,8 +21,13 @@ defmodule PartyLineWeb.Router do
     live "/", LandingLive
     live "/line", RoomLive
     live "/host", HostLive
-    live "/boards", BoardsLive, :index
-    live "/boards/:id", BoardsLive, :show
+    # the boards: the reddit-esque posts site (bot posts, votes, hot)
+    live "/boards", FrontpageLive, :front
+    live "/boards/b/:board", FrontpageLive, :board
+    live "/boards/:id", FrontpageLive, :show
+    # the wall: humans' clipped chat exchanges (a different thing)
+    live "/wall", BoardsLive, :index
+    live "/wall/:id", BoardsLive, :show
 
     # atproto OAuth (sign in with your handle — no app passwords)
     post "/oauth/login", OAuthController, :login

@@ -778,3 +778,55 @@ html[data-pl-theme="modern"] {
   }
   & .retro-boardquote:hover { background: #f7f7f8; }
 }
+
+/* the boards: reddit-esque posts engine (votebox, board nav, post rows) */
+.retro-body--feed { padding: 0; }
+.retro-boardnav {
+  position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: 2px;
+  background: #c0c0c0; padding: 6px 8px 0; border-bottom: 1px solid #808080;
+}
+.retro-boardtab {
+  padding: 5px 12px; font-size: .82rem; text-decoration: none; color: #000;
+  background: #c0c0c0;
+  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #808080;
+}
+.retro-boardtab.is-active { background: #fff; font-weight: 700; box-shadow: inset 1px 1px 0 #fff; }
+.retro-boardtab:hover { background: #d4d4d4; }
+
+.retro-votebox {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  min-width: 40px; padding-top: 2px;
+}
+.retro-vote {
+  border: none; background: none; cursor: pointer; font-size: .9rem; line-height: 1;
+  color: #808080; padding: 2px 4px;
+}
+.retro-vote:hover { color: #000; }
+.retro-vote.is-up { color: #ff6a00; }
+.retro-vote.is-down { color: #6a80ff; }
+.retro-votescore { font-weight: 700; font-size: .82rem; font-variant-numeric: tabular-nums; }
+.retro-posttopic {
+  display: block; font-weight: 700; color: #000080; text-decoration: none;
+  line-height: 1.35; margin-bottom: 3px;
+}
+.retro-posttopic:hover { text-decoration: underline; }
+.retro-posttext { line-height: 1.5; margin: 2px 0; }
+.retro-posttext--clamp {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; color: #333;
+}
+.retro-postmeta { font-size: .76rem; color: #606060; margin-top: 5px; }
+.retro-postlabel {
+  background: #ffe0e0; color: #a00; border: 1px solid #d88; padding: 0 4px;
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; margin-left: 4px;
+}
+.retro-postfull { display: flex; gap: 12px; }
+.retro-boarditem .retro-boardbody { padding-left: 4px; }
+html[data-pl-theme="modern"] {
+  & .retro-boardnav { background: #fff; border-bottom: 1px solid #ececf1; gap: 6px; padding: 10px; }
+  & .retro-boardtab { background: #f7f7f8; border-radius: 999px; box-shadow: none; }
+  & .retro-boardtab.is-active { background: #10a37f; color: #fff; }
+  & .retro-vote.is-up { color: #10a37f; }
+  & .retro-posttopic { color: #202123; }
+  & .retro-postlabel { background: #fdeaea; border-color: #f5c2c2; border-radius: 4px; }
+}

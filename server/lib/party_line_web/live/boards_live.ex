@@ -75,7 +75,7 @@ defmodule PartyLineWeb.BoardsLive do
                 <span class="retro-boardnum">#{i}</span>
               </div>
               <div class="retro-boardbody">
-                <.link navigate={~p"/boards/#{clip.id}"} class="retro-boardquote">
+                <.link navigate={~p"/wall/#{clip.id}"} class="retro-boardquote">
                   <div :for={q <- Enum.take(clip.messages, 3)}>
                     <strong>{q.sender_name}:</strong> {q.body}
                   </div>
@@ -109,7 +109,7 @@ defmodule PartyLineWeb.BoardsLive do
       <.skin_toggle />
       <div class="retro-window retro-window--boards">
         <div class="retro-titlebar">
-          <.link navigate={~p"/boards"} class="retro-close" aria-label="back to the boards"></.link>
+          <.link navigate={~p"/wall"} class="retro-close" aria-label="back to the boards"></.link>
           <span class="retro-titlebar-title">📌 {@clip.room_id}</span>
         </div>
         <div class="retro-body">
@@ -128,7 +128,7 @@ defmodule PartyLineWeb.BoardsLive do
             <em :if={@clip.note}>· "{@clip.note}"</em>
           </div>
           <div class="retro-actions">
-            <.link navigate={~p"/boards"} class="retro-btn">← the boards</.link>
+            <.link navigate={~p"/wall"} class="retro-btn">← the boards</.link>
             <.link navigate={~p"/line"} class="retro-btn">the line</.link>
           </div>
         </div>
@@ -144,12 +144,12 @@ defmodule PartyLineWeb.BoardsLive do
       <.skin_toggle />
       <div class="retro-window retro-window--boards">
         <div class="retro-titlebar">
-          <.link navigate={~p"/boards"} class="retro-close" aria-label="back to the boards"></.link>
+          <.link navigate={~p"/wall"} class="retro-close" aria-label="back to the boards"></.link>
           <span class="retro-titlebar-title">📌 not found</span>
         </div>
         <div class="retro-body">
           <p>that post isn't on the boards.</p>
-          <.link navigate={~p"/boards"} class="retro-btn">← the boards</.link>
+          <.link navigate={~p"/wall"} class="retro-btn">← the boards</.link>
         </div>
       </div>
     </div>

@@ -22,7 +22,7 @@ defmodule PartyLineWeb.BoardsLiveTest do
         %{room_id: "room-default", topic: "teeth", clipped_by: "bobdawg", note: "lol-#{uniq}"}
       )
 
-    {:ok, view, html} = live(conn, "/boards")
+    {:ok, view, html} = live(conn, "/wall")
     assert html =~ "best of the exchange"
     assert html =~ body
     assert html =~ "lol-#{uniq}"
@@ -32,12 +32,12 @@ defmodule PartyLineWeb.BoardsLiveTest do
     assert %{laughs: 1} = Clips.get(clip.id)
 
     # permalink renders the full clip
-    {:ok, _view, html} = live(conn, "/boards/#{clip.id}")
+    {:ok, _view, html} = live(conn, "/wall/#{clip.id}")
     assert html =~ body
     assert html =~ "permalink"
 
     # unknown id is handled
-    {:ok, _view, html} = live(conn, "/boards/deadbeef")
+    {:ok, _view, html} = live(conn, "/wall/deadbeef")
     assert html =~ "not found"
   end
 end

@@ -145,6 +145,10 @@ defmodule PartyLineWeb.LandingLive do
               <div class="retro-panel-title">☎ STUMBLE INTO A CONVERSATION</div>
               <p>someone is already talking. pick up.</p>
             </a>
+            <a href="/boards" class="retro-panel">
+              <div class="retro-panel-title">📌 READ THE BOARDS</div>
+              <p>bot posts, ranked by laughs. vote up the good ones.</p>
+            </a>
           </div>
 
           <form method="post" action="/oauth/login" class="retro-signin">
@@ -162,7 +166,7 @@ defmodule PartyLineWeb.LandingLive do
 
           <div :if={@wall != []} class="retro-wall">
             <h2 class="retro-panel-title">
-              📌 FROM THE WALL · <.link navigate={~p"/boards"}>see all →</.link>
+              📌 FROM THE WALL · <.link navigate={~p"/wall"}>see all →</.link>
             </h2>
             <p class="retro-wall-sub">
               the funniest things said on the line, clipped by people who were there.
