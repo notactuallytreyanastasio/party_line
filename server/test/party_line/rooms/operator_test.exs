@@ -240,6 +240,59 @@ defmodule PartyLine.Rooms.OperatorTest do
     assert new_topic == Enum.at(@cfg.topic_deck, 1)
   end
 
+  test "an expired segment with no bots present stays quiet" do
+    v =
+      view(
+        segment: %{topic: "t", started_at_ms: 0, messages: @cfg.segment_max_messages},
+        bots: []
+      )
+
+    assert Operator.evaluate(v, @cfg) == :quiet
+  end
+
+  test "rotation from a custom (non-deck) topic picks the first deck entry" do
+    v =
+      view(
+        topic: "our own weird line topic",
+        segment: %{
+          topic: "our own weird line topic",
+          started_at_ms: 1_000_000,
+          messages: @cfg.segment_max_messages
+        },
+        bots: [%{id: "p-1", name: "horse dentist"}]
+      )
+
+    assert {:speak_and_rotate, body, new_topic} = Operator.evaluate(v, @cfg)
+    assert new_topic == hd(@cfg.topic_deck)
+    refute new_topic == "our own weird line topic"
+    assert body =~ "@horse dentist, you start."
+  end
+
+  test "a single-entry pool equal to the current topic falls back without crashing" do
+    v =
+      view(
+        topic: "the only topic there is",
+        topic_deck: ["the only topic there is"],
+        segment: %{
+          topic: "the only topic there is",
+          started_at_ms: 1_000_000,
+          messages: @cfg.segment_max_messages
+        },
+        bots: [%{id: "p-1", name: "horse dentist"}]
+      )
+
+    assert {:speak_and_rotate, _body, "the only topic there is"} = Operator.evaluate(v, @cfg)
+  end
+
+  test "dead_air's suggested prompt is never the current topic" do
+    # the default view's topic IS deck[0], so the prompt must be deck[1]
+    v = view(silent_beats: @cfg.dead_air_beats)
+
+    assert {:speak, "quiet line. try this: " <> suggested} = Operator.evaluate(v, @cfg)
+    refute suggested == v.topic
+    assert suggested == Enum.at(@cfg.topic_deck, 1)
+  end
+
   # ── Room integration suite ─────────────────────────────────────────────────
   #
   # Millisecond-scale director with the operator switched on. Each participant
@@ -430,5 +483,159 @@ defmodule PartyLine.Rooms.OperatorTest do
     say(room, :b, b, "two")
 
     refute_receive {_, %{type: :message, sender: %{kind: :operator}}}, 200
+  end
+
+  # ── Suggestion capture ("@Operator topic: …") through the Room ───────────
+
+  test "a human @Operator topic: suggestion commits normally and draws the ack" do
+    room = start_room(operator_cooldown_ms: 0)
+    # lurker: no greet message to race the ack
+    {h, _} = join(room, :h, %{name: "Bobby", kind: :human, lurk: true})
+
+    Room.speak(room, h, nil, "@Operator topic: the migratory habits of shopping carts")
+
+    assert_receive {:h,
+                    %{
+                      type: :message,
+                      sender: %{kind: :human},
+                      body: "@Operator topic: the migratory habits of shopping carts"
+                    }},
+                   1_000
+
+    assert_receive {:h,
+                    %{
+                      type: :message,
+                      sender: %{kind: :operator},
+                      body: "noted. it goes in the deck."
+                    }},
+                   1_000
+  end
+
+  test "suggestion capture is case-insensitive and whitespace-tolerant, but demands text" do
+    room = start_room(operator_cooldown_ms: 0)
+    {h, _} = join(room, :h, %{name: "Bobby", kind: :human, lurk: true})
+
+    # not a suggestion: no colon after "topic"
+    Room.speak(room, h, nil, "@Operator topics are cool")
+    assert_receive {:h, %{type: :message, sender: %{kind: :human}}}, 1_000
+    refute_receive {:h, %{type: :message, sender: %{kind: :operator}}}, 100
+
+    # not a suggestion: colon but no text
+    Room.speak(room, h, nil, "@Operator topic:")
+    assert_receive {:h, %{type: :message, sender: %{kind: :human}}}, 1_000
+    refute_receive {:h, %{type: :message, sender: %{kind: :operator}}}, 100
+
+    # shouty and sloppy still lands
+    Room.speak(room, h, nil, "  @OPERATOR   topic:   the great glitter embargo  ")
+
+    assert_receive {:h,
+                    %{
+                      type: :message,
+                      sender: %{kind: :operator},
+                      body: "noted. it goes in the deck."
+                    }},
+                   1_000
+  end
+
+  test "a captured suggestion becomes the next rotation target" do
+    suggestion = "the migratory habits of shopping carts #{System.unique_integer([:positive])}"
+    room = start_room(segment_max_messages: 3, operator_cooldown_ms: 0)
+    {a, _} = join(room, :a, %{name: "horse dentist", kind: :bot})
+    {h, _} = join(room, :h, %{name: "Bobby", kind: :human, lurk: true})
+
+    # the suggestion is segment message 1 and enters the topic pool right
+    # after this room's initial topic in cycle order
+    Room.speak(room, h, nil, "@Operator topic: #{suggestion}")
+
+    assert_receive {:a,
+                    %{
+                      type: :message,
+                      sender: %{kind: :operator},
+                      body: "noted. it goes in the deck."
+                    }},
+                   1_000
+
+    # two more committed messages hit the segment cap and force a rotation
+    say(room, :a, a, "one small step for carts")
+    say(room, :a, a, "two carts diverged in a wood")
+
+    assert_receive {:a, %{type: :message, sender: %{kind: :operator}, body: body}}, 1_000
+    assert body =~ ~s(that's time on "test topic". new topic: #{suggestion})
+    assert body =~ "@horse dentist, you start."
+  end
+
+  test "the suggestion queue caps at 12, dropping the oldest" do
+    uniq = System.unique_integer([:positive])
+
+    # fully distinct words so the staleness detector never fires mid-stream
+    suggs =
+      for i <- 1..13,
+          do: "s#{uniq}x#{i} alpha#{uniq}#{i} beta#{uniq}#{i} gamma#{uniq}#{i}"
+
+    room = start_room(segment_max_messages: 14, operator_cooldown_ms: 0)
+    {a, _} = join(room, :a, %{name: "horse dentist", kind: :bot})
+    {h, _} = join(room, :h, %{name: "Bobby", kind: :human, lurk: true})
+
+    for s <- suggs do
+      Room.speak(room, h, nil, "@Operator topic: #{s}")
+
+      # drain BOTH participants' copies of the ack, or the stale :a copies
+      # sit in the mailbox and satisfy the rotation assert_receive below
+      for tag <- [:h, :a] do
+        assert_receive {^tag,
+                        %{
+                          type: :message,
+                          sender: %{kind: :operator},
+                          body: "noted. it goes in the deck."
+                        }},
+                       1_000
+      end
+    end
+
+    # 13 human commits + 1 bot commit = the segment cap → rotation. The pool
+    # cycles from the initial topic straight into the suggestion queue, so
+    # the announced topic is the queue's head: suggestion 2 if (and only if)
+    # suggestion 1 was evicted.
+    say(room, :a, a, "and now for something else entirely")
+
+    # the rotation line — stepping past any "noted…" ack still queued from the
+    # suggestion drain so a stale copy can't satisfy this assertion
+    body = assert_rotation(:a)
+    assert body =~ "new topic: #{Enum.at(suggs, 1)}"
+    refute body =~ Enum.at(suggs, 0)
+  end
+
+  # Await the operator's topic-rotation announcement specifically, discarding
+  # any earlier operator messages (e.g. a lingering suggestion ack).
+  defp assert_rotation(tag) do
+    assert_receive {^tag, %{type: :message, sender: %{kind: :operator}, body: body}}, 1_000
+
+    if body =~ "new topic:", do: body, else: assert_rotation(tag)
+  end
+
+  # ── Multi-word handles through the operator's own mentions ───────────────
+
+  test "the operator summons a multi-word lowercase wallflower and does not re-nag" do
+    room = start_room(wallflower_after: 2, operator_cooldown_ms: 0)
+    {e, _} = join(room, :e, %{name: "erowid smoothie", kind: :bot})
+    {_d, _} = join(room, :d, %{name: "horse dentist", kind: :bot})
+
+    # erowid talks; horse dentist stays quiet past the wallflower window
+    say(room, :e, e, "carts one")
+    say(room, :e, e, "carts two")
+
+    assert_receive {:e,
+                    %{
+                      type: :message,
+                      sender: %{kind: :operator},
+                      body: "@horse dentist, you've been quiet. thoughts?",
+                      mentions: [%{name: "horse dentist", kind: :bot}]
+                    }},
+                   1_000
+
+    # the summons reset the wallflower window (note_summons parsed the
+    # multi-word handle out of the operator's own body) — no immediate re-nag
+    # even with the operator cooldown at zero and the segment tick running
+    refute_receive {:e, %{type: :message, sender: %{kind: :operator}}}, 150
   end
 end

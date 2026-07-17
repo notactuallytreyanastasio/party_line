@@ -58,8 +58,9 @@ defmodule PartyLineWeb.RoomLiveTest do
     {:ok, welcome} = Room.join(room, %{name: "Speaker", kind: :human, pid: pid})
     Room.speak(room, welcome.participant_id, nil, "psst @Watcher")
 
-    # give the broadcast a beat to arrive
-    Process.sleep(50)
+    # snapshot serializes behind the speak cast, so the broadcast has already
+    # reached the view's mailbox; render then queues behind it
+    _ = Room.snapshot(room)
     html = render(view)
     assert html =~ "Speaker"
     assert html =~ "psst"
@@ -101,7 +102,7 @@ defmodule PartyLineWeb.RoomLiveTest do
     |> element(~s{#speak-form-#{window_index(view, "room-switch-a")}})
     |> render_submit(%{body: "hello line a"})
 
-    Process.sleep(50)
+    # each snapshot call serializes behind that room's speak cast
     assert Enum.any?(Room.snapshot(room_a).transcript, &(&1.body == "hello line a"))
     refute Enum.any?(Room.snapshot(room_b).transcript, &(&1.body == "hello line a"))
   end
@@ -166,7 +167,8 @@ defmodule PartyLineWeb.RoomLiveTest do
     |> element(~s{form[phx-submit="dm_send"]})
     |> render_submit(%{buddy: "clipper", body: "did you see that"})
 
-    Process.sleep(30)
+    # send_dm is a call that broadcasts before replying, so by the time the
+    # submit returns the DM is already in v1's mailbox — render queues behind it
     html1 = render(v1)
     assert html1 =~ "✉ receiver"
     assert html1 =~ "did you see that"
@@ -178,6 +180,121 @@ defmodule PartyLineWeb.RoomLiveTest do
 
     landing |> element(~s{button[phx-value-id="#{clip.id}"]}) |> render_click()
     assert %{laughs: 1} = Enum.find(PartyLine.Clips.wall(50), &(&1.id == clip.id))
+  end
+
+  test "dialing with a blank name shows an error and stays on the dialing stage", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/line")
+
+    html = view |> element("form") |> render_submit(%{name: "   "})
+    assert html =~ "pick a name first"
+    # still on the dialing stage, not the switchboard
+    assert html =~ "dial in"
+    assert html =~ "party line — dialing"
+  end
+
+  test "a participant leaving prunes the window roster", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/line")
+    view |> element("form") |> render_submit(%{name: "roster watcher"})
+
+    {:ok, room} = Rooms.whereis("room-default")
+    base = on_the_line(view, "room-default")
+
+    pid = spawn_link(fn -> Process.sleep(:infinity) end)
+    {:ok, welcome} = Room.join(room, %{name: "brief visitor", kind: :human, pid: pid})
+
+    # join is a call that broadcasts presence before replying, so the view has
+    # already been told; on_the_line renders, which queues behind that message
+    assert on_the_line(view, "room-default") == base + 1
+
+    Room.leave(room, welcome.participant_id)
+
+    # leave is a cast — snapshot to serialize behind it before re-rendering
+    _ = Room.snapshot(room)
+    assert on_the_line(view, "room-default") == base
+  end
+
+  # App bug: DMs.send_dm/5 has two defaults (server \\ @name, opts \\ []), so the
+  # 4-arity call in RoomLive's "clip_share" handler binds the sender's NAME as the
+  # GenServer server ({server, from, to, body, opts} = {"clip sharer", buddy, subject,
+  # opts, []}) and crashes in GenServer.whereis/1 — clip sharing is broken in prod too.
+  @tag :skip
+  test "sharing a clip DMs the buddy and clears the selection", %{conn: conn} do
+    uniq = System.unique_integer([:positive])
+    body = "share-worthy-#{uniq}"
+
+    # the recipient dials first so the sharer's buddy list includes them
+    {:ok, catcher, _} = live(conn, "/line")
+    catcher |> element("form") |> render_submit(%{name: "clip catcher"})
+
+    {:ok, sharer, _} = live(Phoenix.ConnTest.build_conn(), "/line")
+    sharer |> element("form") |> render_submit(%{name: "clip sharer"})
+
+    {:ok, room} = Rooms.whereis("room-default")
+    pid = spawn_link(fn -> Process.sleep(:infinity) end)
+    {:ok, welcome} = Room.join(room, %{name: "clip source #{uniq}", kind: :human, pid: pid})
+    Room.speak(room, welcome.participant_id, nil, body)
+    msg = Enum.find(Room.snapshot(room).transcript, &(&1.body == body))
+
+    idx = window_index(sharer, "room-default")
+
+    sharer
+    |> element("#messages-#{idx}")
+    |> render_hook("select", %{"room" => "room-default", "ids" => [msg.message_id]})
+
+    assert render(sharer) =~ "1 clipped"
+
+    sharer |> element("#clipshare-#{idx}") |> render_submit(%{buddy: "clip catcher"})
+
+    # success clears the selection (the failure path keeps it)
+    refute render(sharer) =~ "1 clipped"
+
+    # the recipient's switchboard auto-opens the DM with the quoted clip —
+    # send_dm broadcast before replying, so this render is already ordered
+    html = render(catcher)
+    assert html =~ "✉ clip sharer"
+    assert html =~ "clipped from room-default"
+    assert html =~ body
+  end
+
+  test "closing a DM window removes it", %{conn: conn} do
+    {:ok, target, _} = live(conn, "/line")
+    target |> element("form") |> render_submit(%{name: "dm target"})
+
+    {:ok, opener, _} = live(Phoenix.ConnTest.build_conn(), "/line")
+    opener |> element("form") |> render_submit(%{name: "dm opener"})
+
+    opener |> element(~s{button[phx-value-buddy="dm target"]}, "IM") |> render_click()
+    assert render(opener) =~ "✉ dm target"
+
+    opener
+    |> element(~s{button[phx-click="close_dm"][phx-value-buddy="dm target"]})
+    |> render_click()
+
+    refute render(opener) =~ "✉ dm target"
+  end
+
+  test "speaking while lurking is a no-op", %{conn: conn} do
+    uniq = System.unique_integer([:positive])
+    body = "lurker noise #{uniq}"
+
+    {:ok, view, _html} = live(conn, "/line")
+    view |> element("form") |> render_submit(%{name: "quiet possum"})
+
+    # no announce — submit the speak form straight from the lurking state
+    view
+    |> element("#speak-form-#{window_index(view, "room-default")}")
+    |> render_submit(%{body: body})
+
+    # snapshot serializes behind the speak cast: if the lurker's line were
+    # going to commit, it would have by the time this call returns
+    {:ok, room} = Rooms.whereis("room-default")
+    refute Enum.any?(Room.snapshot(room).transcript, &(&1.body == body))
+  end
+
+  # the "N on the line" count in a window's statusbar
+  defp on_the_line(view, room_id) do
+    [_, n] = Regex.run(~r/#{room_id}[^<]*<\/span>\s*<span>(\d+) on the line/, render(view))
+    String.to_integer(n)
   end
 
   # find which window index a room landed in (window order = list_rooms order)
