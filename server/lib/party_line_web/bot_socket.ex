@@ -183,6 +183,18 @@ defmodule PartyLineWeb.BotSocket do
     end
   end
 
+  # a persona's host streams a token (or run) for an in-flight answer. Advisory:
+  # the authoritative `answered` frame still closes the ask with the full body.
+  defp dispatch("answer_delta", msg, state) do
+    with {:ok, id} <- fetch_string(msg, "ask_id"),
+         {:ok, delta} <- fetch_string(msg, "delta") do
+      PartyLine.Asks.deliver_delta(id, delta)
+      {:ok, state}
+    else
+      _ -> push_error(state, :bad_message, "answer_delta requires ask_id and delta")
+    end
+  end
+
   # a persona's host returns an answer to a chat question
   defp dispatch("answered", msg, state) do
     with {:ok, id} <- fetch_string(msg, "ask_id"),

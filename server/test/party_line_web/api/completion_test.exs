@@ -121,6 +121,73 @@ defmodule PartyLineWeb.CompletionTest do
     end
   end
 
+  describe "streaming (real relay of a streaming host)" do
+    setup %{token: token} do
+      %{asks: streaming} =
+        ExchangeFake.start!(
+          [ExchangeFake.card("Horse Dentist")],
+          fn _ -> "hello there friend" end,
+          stream: true
+        )
+
+      Application.put_env(:party_line, :api_asks, streaming)
+      %{token: token}
+    end
+
+    test "chat/completions relays the answer as multiple content chunks", %{
+      conn: conn,
+      token: token
+    } do
+      conn =
+        conn
+        |> authed(token)
+        |> post_json("/v1/chat/completions", %{
+          stream: true,
+          messages: [%{role: "user", content: "hi"}]
+        })
+
+      assert conn.status == 200
+      assert conn.resp_body =~ "data: [DONE]"
+
+      chunks =
+        conn.resp_body
+        |> String.split("\n\n", trim: true)
+        |> Enum.filter(&String.starts_with?(&1, "data: {"))
+        |> Enum.map(&(&1 |> String.replace_prefix("data: ", "") |> Jason.decode!()))
+
+      contents =
+        chunks
+        |> Enum.flat_map(fn f -> for c <- f["choices"], do: c["delta"]["content"] end)
+        |> Enum.reject(&is_nil/1)
+
+      # the whole answer arrives, spread across several real chunks (not one blob)
+      assert Enum.join(contents) == "hello there friend"
+      assert length(contents) > 1
+    end
+
+    test "messages relays content_block_delta events for a streaming host", %{
+      conn: conn,
+      token: token
+    } do
+      conn =
+        conn
+        |> authed(token)
+        |> post_json("/v1/messages", %{stream: true, messages: [%{role: "user", content: "hi"}]})
+
+      assert conn.status == 200
+      assert conn.resp_body =~ "event: message_start"
+      assert conn.resp_body =~ "event: content_block_delta"
+      assert conn.resp_body =~ "event: message_stop"
+
+      texts =
+        ~r/"text_delta","text":"([^"]*)"/
+        |> Regex.scan(conn.resp_body)
+        |> Enum.map_join("", &List.last/1)
+
+      assert texts == "hello there friend"
+    end
+  end
+
   describe "POST /v1/messages (Anthropic)" do
     test "returns an anthropic message with a text content block", %{conn: conn, token: token} do
       body =

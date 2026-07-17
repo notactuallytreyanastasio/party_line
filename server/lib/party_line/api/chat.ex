@@ -23,28 +23,50 @@ defmodule PartyLine.API.Chat do
   @receive_timeout 120_000
 
   @type result :: %{content: String.t(), decision: map(), prompt_tokens: non_neg_integer()}
+  @type handle :: %{ask_id: String.t(), decision: map(), prompt_tokens: non_neg_integer()}
 
   @doc """
-  Run a completion. `messages` is a list of `LangChain.Message`. Options:
+  Kick off a completion without waiting. The calling process becomes the asker,
+  so it will receive `{:answer_delta, ask_id, delta}` messages (if the host
+  streams) and exactly one terminal `{:answered, ask_id, body, decision}` or
+  `{:ask_failed, ask_id, reason}`. Returns a `handle` (ask id, routing
+  decision, prompt-token estimate) or `{:error, :nobody_online}`.
 
-    * `:model` — the requested model string (persona, family, or an "auto" alias)
-    * `:asks` — the correlator server (default `PartyLine.Asks`), injectable for tests
-    * `:timeout` — receive-side safety timeout in ms
-
-  Returns `{:ok, result}`, or `{:error, :nobody_online | :timeout | :agent_gone}`.
+  Use this for streaming, where the controller drives its own relay loop; use
+  `complete/2` for the blocking, non-streaming case.
   """
-  @spec complete([Message.t()], keyword()) :: {:ok, result()} | {:error, atom()}
-  def complete(messages, opts \\ []) do
+  @spec start([Message.t()], keyword()) :: {:ok, handle()} | {:error, :nobody_online}
+  def start(messages, opts \\ []) do
     asks = Keyword.get(opts, :asks, Asks)
-    timeout = Keyword.get(opts, :timeout, @receive_timeout)
     prompt = flatten(messages)
 
     case Asks.ask(asks, self(), prompt, target: target_for(opts[:model])) do
       {:error, :nobody_online} ->
         {:error, :nobody_online}
 
-      {:ok, ask_id, _decision} ->
-        await(ask_id, timeout, estimate_tokens(prompt))
+      {:ok, ask_id, decision} ->
+        {:ok, %{ask_id: ask_id, decision: decision, prompt_tokens: estimate_tokens(prompt)}}
+    end
+  end
+
+  @doc """
+  Run a completion and block for the answer. `messages` is a list of
+  `LangChain.Message`. Options:
+
+    * `:model` — the requested model string (persona, family, or an "auto" alias)
+    * `:asks` — the correlator server (default `PartyLine.Asks`), injectable for tests
+    * `:timeout` — receive-side safety timeout in ms
+
+  Returns `{:ok, result}`, or `{:error, :nobody_online | :timeout | :agent_gone}`.
+  Any streamed deltas are consumed and ignored — the final `answered` body is
+  authoritative for the non-streaming shape.
+  """
+  @spec complete([Message.t()], keyword()) :: {:ok, result()} | {:error, atom()}
+  def complete(messages, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, @receive_timeout)
+
+    with {:ok, handle} <- start(messages, opts) do
+      await(handle, timeout)
     end
   end
 
@@ -64,10 +86,15 @@ defmodule PartyLine.API.Chat do
 
   # ── waiting ────────────────────────────────────────────────────────────────
 
-  defp await(ask_id, timeout, prompt_tokens) do
+  defp await(%{ask_id: ask_id} = handle, timeout) do
     receive do
+      # a streamed token in the non-streaming path: swallow it, the final
+      # answered body is authoritative
+      {:answer_delta, ^ask_id, _delta} ->
+        await(handle, timeout)
+
       {:answered, ^ask_id, body, decision} ->
-        {:ok, %{content: body, decision: decision, prompt_tokens: prompt_tokens}}
+        {:ok, %{content: body, decision: decision, prompt_tokens: handle.prompt_tokens}}
 
       {:ask_failed, ^ask_id, reason} ->
         {:error, reason}

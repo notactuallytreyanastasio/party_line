@@ -13,17 +13,20 @@ defmodule PartyLine.Test.ExchangeFake do
   alias PartyLine.Agents.Card
   alias PartyLine.Asks
 
-  defstruct cards: [], answer: nil, asks: nil, last: nil
+  defstruct cards: [], answer: nil, asks: nil, last: nil, stream: false
 
   @doc """
   Start a fake exchange: a fake Bots plus a real Asks wired to it.
 
   `cards` is the online roster (`[Card.t()]`); `answer` is a `fn prompt ->
-  body end`. Returns `%{bots: pid, asks: pid}` — point the API at them with
-  `config :party_line, :api_asks` / `:api_bots`.
+  body end`. With `stream: true`, the fake first dribbles the answer back as
+  `deliver_delta/3` chunks before the authoritative `deliver/3` — the same
+  shape a real streaming host produces. Returns `%{bots: pid, asks: pid}` —
+  point the API at them with `config :party_line, :api_asks` / `:api_bots`.
   """
-  def start!(cards, answer \\ fn _ -> "the couch is structurally sound" end) do
-    {:ok, bots} = GenServer.start_link(__MODULE__, %{cards: cards, answer: answer})
+  def start!(cards, answer \\ fn _ -> "the couch is structurally sound" end, opts \\ []) do
+    state = %{cards: cards, answer: answer, stream: Keyword.get(opts, :stream, false)}
+    {:ok, bots} = GenServer.start_link(__MODULE__, state)
     {:ok, asks} = Asks.start_link(name: nil, bots: bots)
     :ok = GenServer.call(bots, {:set_asks, asks})
     %{bots: bots, asks: asks}
@@ -56,9 +59,18 @@ defmodule PartyLine.Test.ExchangeFake do
   def handle_call(:last, _from, s), do: {:reply, s.last, s}
 
   def handle_call({:request_answer, persona, %{id: id, prompt: prompt}}, _from, s) do
-    # deliver is a cast, so it queues on Asks behind the in-flight ask handler
-    # and lands after the pending slot is registered — the real ordering.
-    Asks.deliver(s.asks, id, s.answer.(prompt))
+    body = s.answer.(prompt)
+
+    # deliver(_delta) are casts, so they queue on Asks behind the in-flight ask
+    # handler and land in order after the pending slot is registered.
+    if s.stream do
+      body
+      |> String.graphemes()
+      |> Enum.chunk_every(5)
+      |> Enum.each(&Asks.deliver_delta(s.asks, id, Enum.join(&1)))
+    end
+
+    Asks.deliver(s.asks, id, body)
     {:reply, :ok, %{s | last: {persona, prompt}}}
   end
 end

@@ -235,6 +235,18 @@ defmodule PartyLineWeb.BotSocketTest do
     assert no_id["code"] == "bad_message"
   end
 
+  test "answer_delta streams a token; a malformed one is rejected" do
+    room_id = fresh_room()
+    {_welcome, ws} = join!("gas station sushi", "bot", room_id)
+
+    # a well-formed delta is accepted silently (deliver_delta is a cast, and it
+    # drops when no ask is in flight) — so the next error belongs to the probe
+    ws = WS.send!(ws, %{type: "answer_delta", ask_id: "ask-x", delta: "tok"})
+    ws = WS.send!(ws, %{type: "answer_delta", ask_id: "ask-x"})
+    {error, _} = WS.recv!(ws, type("error"))
+    assert error["code"] == "bad_message"
+  end
+
   test "join twice is already_joined; bad kind and missing name are join_failed" do
     room_id = fresh_room()
     {_welcome, ws} = join!("Nova", "bot", room_id)

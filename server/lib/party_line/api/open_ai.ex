@@ -69,38 +69,56 @@ defmodule PartyLine.API.OpenAI do
   end
 
   @doc """
-  The SSE frames for a streamed answer: a role delta, the content in a few
-  chunks, a stop delta, then `[DONE]`. The answer already exists whole — this
-  is streaming shape over a single body, so clients that require a stream work.
+  A streaming context — one stable id/created/model shared by every chunk of a
+  single streamed response, as the OpenAI stream format requires.
+  """
+  @spec stream_ctx(String.t()) :: map()
+  def stream_ctx(model),
+    do: %{id: id("chatcmpl"), created: System.system_time(:second), model: model}
+
+  @doc "Opening chunk: the assistant role delta."
+  def stream_start(ctx),
+    do: chunk(ctx, [%{index: 0, delta: %{role: "assistant"}, finish_reason: nil}])
+
+  @doc "A content chunk carrying one token/run of streamed text."
+  def stream_delta(ctx, text),
+    do: chunk(ctx, [%{index: 0, delta: %{content: text}, finish_reason: nil}])
+
+  @doc "Closing chunk: the stop delta."
+  def stream_stop(ctx), do: chunk(ctx, [%{index: 0, delta: %{}, finish_reason: "stop"}])
+
+  @doc "The final `[DONE]` sentinel."
+  def stream_done, do: "data: [DONE]\n\n"
+
+  @doc """
+  All SSE frames for an answer already in hand — start, the body in a few
+  chunks, stop, `[DONE]`. Used when the whole body arrives at once (a
+  non-streaming host, or a test).
   """
   @spec stream_frames(Chat.result(), String.t() | nil) :: [String.t()]
   def stream_frames(result, requested_model) do
-    id = id("chatcmpl")
-    created = System.system_time(:second)
-    model = model_label(result, requested_model)
-    base = %{id: id, object: "chat.completion.chunk", created: created, model: model}
-    chunk = fn choices -> frame(Map.put(base, :choices, choices)) end
-
-    role = chunk.([%{index: 0, delta: %{role: "assistant"}, finish_reason: nil}])
-
-    content =
-      result.content
-      |> chunk_text()
-      |> Enum.map(fn piece ->
-        chunk.([%{index: 0, delta: %{content: piece}, finish_reason: nil}])
-      end)
-
-    stop = chunk.([%{index: 0, delta: %{}, finish_reason: "stop"}])
-
-    [role] ++ content ++ [stop, "data: [DONE]\n\n"]
+    ctx = stream_ctx(model_label(result, requested_model))
+    deltas = result.content |> chunk_text() |> Enum.map(&stream_delta(ctx, &1))
+    [stream_start(ctx)] ++ deltas ++ [stream_stop(ctx), stream_done()]
   end
 
   # ── helpers ────────────────────────────────────────────────────────────────
 
   # the answering persona is the honest "model" label; echo the request only
   # when the caller didn't get routed somewhere more specific
-  defp model_label(%{decision: %{card: card}}, _requested), do: card.persona
-  defp model_label(_result, requested), do: requested || "party-line-auto"
+  @doc "The model label to advertise for an answer: the answering persona."
+  def model_label(%{decision: %{card: card}}, _requested), do: card.persona
+  def model_label(_result, requested), do: requested || "party-line-auto"
+
+  defp chunk(ctx, choices) do
+    frame(%{
+      id: ctx.id,
+      object: "chat.completion.chunk",
+      created: ctx.created,
+      model: ctx.model,
+      choices: choices
+    })
+  end
 
   defp attribution(%{card: card} = decision) do
     %{

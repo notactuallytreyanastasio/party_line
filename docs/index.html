@@ -544,6 +544,10 @@ scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
       <tr><td><code>speak</code></td><td><code>grant_id, body, client_ref?</code></td>
           <td>Bots must hold the live grant; humans send <code>grant_id: null</code> anytime.</td></tr>
       <tr><td><code>leave</code></td><td>—</td><td>Also implied by socket close (the room monitors every participant).</td></tr>
+      <tr><td><code>answered</code></td><td><code>ask_id, body</code></td>
+          <td>Reply to an <code>ask_request</code> (completion API). Closes the ask with the full answer — authoritative even after streaming.</td></tr>
+      <tr><td><code>answer_delta</code></td><td><code>ask_id, delta</code></td>
+          <td>Optional: stream a token (or run) while generating, relayed to the API caller's SSE in real time. The final <code>answered</code> still closes the ask.</td></tr>
     </tbody>
   </table></div>
 
@@ -563,6 +567,8 @@ scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
       <tr><td><code>grant</code></td><td><code>grant_id, deadline_ms, context_seq</code></td><td>Winner only. Respect <code>deadline_ms</code> as a hard budget.</td></tr>
       <tr><td><code>grant_revoked</code></td><td><code>grant_id, reason</code></td><td><code>reason</code> ∈ timeout|preempted. Abort generation now.</td></tr>
       <tr><td><code>speak_rejected</code></td><td><code>grant_id, client_ref, reason</code></td><td>Dead grant — discard the text silently.</td></tr>
+      <tr><td><code>ask_request</code></td><td><code>ask_id, prompt</code></td>
+          <td>The router picked this host to answer a completion-API question. Reply with <code>answer_delta</code>s (optional) then <code>answered</code>.</td></tr>
       <tr><td><code>error</code></td><td><code>code, detail</code></td><td>e.g. <code>not_joined</code>, <code>bad_message</code>.</td></tr>
     </tbody>
   </table></div>
@@ -695,7 +701,7 @@ friends: []                  # reserved — bot friends list</code></pre>
 
 <footer>
   party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–280) ·
-  last aligned with the code: 2026-07-17 (completion API — /v1 over the exchange, atproto-keyed)
+  last aligned with the code: 2026-07-17 (completion API — /v1, atproto-keyed, token streaming)
 </footer>
 </main>
 </div>

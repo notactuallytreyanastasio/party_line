@@ -60,25 +60,25 @@ defmodule PartyLine.API.Anthropic do
     }
   end
 
-  @doc "The named SSE events for a streamed Anthropic answer."
-  @spec stream_frames(Chat.result(), String.t() | nil) :: [String.t()]
-  def stream_frames(result, requested_model) do
-    msg_id = id()
-    model = model_label(result, requested_model)
-    out_tokens = Chat.estimate_tokens_public(result.content)
+  @doc "A streaming context shared by every event of one streamed message."
+  @spec stream_ctx(String.t(), non_neg_integer()) :: map()
+  def stream_ctx(model, input_tokens),
+    do: %{id: id(), model: model, input_tokens: input_tokens}
 
+  @doc "Opening events: `message_start` then `content_block_start`."
+  def stream_open(ctx) do
     start =
       event("message_start", %{
         type: "message_start",
         message: %{
-          id: msg_id,
+          id: ctx.id,
           type: "message",
           role: "assistant",
-          model: model,
+          model: ctx.model,
           content: [],
           stop_reason: nil,
           stop_sequence: nil,
-          usage: %{input_tokens: result.prompt_tokens, output_tokens: 0}
+          usage: %{input_tokens: ctx.input_tokens, output_tokens: 0}
         }
       })
 
@@ -89,35 +89,50 @@ defmodule PartyLine.API.Anthropic do
         content_block: %{type: "text", text: ""}
       })
 
-    deltas =
-      result.content
-      |> chunk_text()
-      |> Enum.map(fn piece ->
-        event("content_block_delta", %{
-          type: "content_block_delta",
-          index: 0,
-          delta: %{type: "text_delta", text: piece}
-        })
-      end)
+    start <> block_start
+  end
 
+  @doc "A `content_block_delta` carrying one token/run of streamed text."
+  def stream_delta(ctx, text) do
+    _ = ctx
+
+    event("content_block_delta", %{
+      type: "content_block_delta",
+      index: 0,
+      delta: %{type: "text_delta", text: text}
+    })
+  end
+
+  @doc "Closing events: block stop, the message stop_reason + output usage, message_stop."
+  def stream_close(ctx, output_tokens) do
+    _ = ctx
     block_stop = event("content_block_stop", %{type: "content_block_stop", index: 0})
 
     message_delta =
       event("message_delta", %{
         type: "message_delta",
         delta: %{stop_reason: "end_turn", stop_sequence: nil},
-        usage: %{output_tokens: out_tokens}
+        usage: %{output_tokens: output_tokens}
       })
 
     stop = event("message_stop", %{type: "message_stop"})
+    block_stop <> message_delta <> stop
+  end
 
-    [start, block_start] ++ deltas ++ [block_stop, message_delta, stop]
+  @doc "All events for an answer already in hand (non-streaming host, or a test)."
+  @spec stream_frames(Chat.result(), String.t() | nil) :: [String.t()]
+  def stream_frames(result, requested_model) do
+    ctx = stream_ctx(model_label(result, requested_model), result.prompt_tokens)
+    deltas = result.content |> chunk_text() |> Enum.map(&stream_delta(ctx, &1))
+    out = Chat.estimate_tokens_public(result.content)
+    [stream_open(ctx)] ++ deltas ++ [stream_close(ctx, out)]
   end
 
   # ── helpers ────────────────────────────────────────────────────────────────
 
-  defp model_label(%{decision: %{card: card}}, _requested), do: card.persona
-  defp model_label(_result, requested), do: requested || "party-line-auto"
+  @doc "The model label to advertise: the answering persona."
+  def model_label(%{decision: %{card: card}}, _requested), do: card.persona
+  def model_label(_result, requested), do: requested || "party-line-auto"
 
   defp attribution(%{card: card} = decision) do
     %{

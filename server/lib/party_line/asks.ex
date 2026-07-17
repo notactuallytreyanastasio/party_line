@@ -70,6 +70,15 @@ defmodule PartyLine.Asks do
   def deliver(server \\ @name, ask_id, body),
     do: GenServer.cast(server, {:deliver, ask_id, body})
 
+  @doc """
+  A host streamed a token (or run of tokens) for an in-flight ask. Forwarded to
+  the asker as `{:answer_delta, ask_id, delta}` without closing the ask — the
+  authoritative `deliver/3` (the `answered` frame) still finishes it. A delta
+  for an ask that already ended is dropped, same as a late answer.
+  """
+  def deliver_delta(server \\ @name, ask_id, delta),
+    do: GenServer.cast(server, {:deliver_delta, ask_id, delta})
+
   @doc "How many questions are in flight."
   def in_flight(server \\ @name), do: GenServer.call(server, :in_flight)
 
@@ -145,6 +154,17 @@ defmodule PartyLine.Asks do
         finish(pending)
         send(pending.asker, {:answered, ask_id, body, pending.decision})
         {:noreply, %{state | pending: rest}}
+    end
+  end
+
+  def handle_cast({:deliver_delta, ask_id, delta}, state) do
+    case state.pending[ask_id] do
+      nil ->
+        {:noreply, state}
+
+      pending ->
+        send(pending.asker, {:answer_delta, ask_id, delta})
+        {:noreply, state}
     end
   end
 

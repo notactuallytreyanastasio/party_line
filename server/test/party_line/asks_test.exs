@@ -84,6 +84,33 @@ defmodule PartyLine.AsksTest do
       assert Asks.in_flight(asks) == 0, "a delivered ask must not keep its slot"
     end
 
+    test "streamed deltas reach the asker without closing the ask" do
+      %{asks: asks} = exchange([card("Horse Dentist", "m-8b-8bit")])
+      {:ok, ask_id, _decision} = Asks.ask(asks, self(), "why do cats knead", [])
+
+      Asks.deliver_delta(asks, ask_id, "they're ")
+      Asks.deliver_delta(asks, ask_id, "testing the couch")
+
+      assert_receive {:answer_delta, ^ask_id, "they're "}
+      assert_receive {:answer_delta, ^ask_id, "testing the couch"}
+      assert Asks.in_flight(asks) == 1, "deltas must not finish the ask"
+
+      # the authoritative answered still closes it
+      Asks.deliver(asks, ask_id, "they're testing the couch")
+      assert_receive {:answered, ^ask_id, "they're testing the couch", _}
+      assert Asks.in_flight(asks) == 0
+    end
+
+    test "a delta for an ask that already ended is dropped" do
+      %{asks: asks} = exchange([card("ada", "m-8b-8bit")])
+      {:ok, ask_id, _} = Asks.ask(asks, self(), "hi", [])
+      Asks.deliver(asks, ask_id, "done")
+      assert_receive {:answered, ^ask_id, "done", _}
+
+      Asks.deliver_delta(asks, ask_id, "too late")
+      refute_receive {:answer_delta, ^ask_id, _}, 50
+    end
+
     test "the cursor carries, so consecutive asks round-robin" do
       %{asks: asks} = exchange([card("ada", "m-20b-8bit"), card("zed", "m-20b-8bit")])
 
