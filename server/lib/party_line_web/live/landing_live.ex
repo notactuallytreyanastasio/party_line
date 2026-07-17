@@ -46,8 +46,6 @@ defmodule PartyLineWeb.LandingLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    socket = Tour.attach(socket, :landing, PartyLineWeb.Tours.landing())
-
     {:ok,
      assign(socket,
        page_title: "party line",
@@ -62,10 +60,6 @@ defmodule PartyLineWeb.LandingLive do
   end
 
   @impl true
-  def handle_event("show_me", _params, socket) do
-    {:noreply, Tour.start(socket, :landing)}
-  end
-
   def handle_event("toggle_start", _params, socket) do
     open = not socket.assigns.start_open
     {:noreply, assign(socket, start_open: open, rooms_open: open and socket.assigns.rooms_open)}
@@ -101,7 +95,6 @@ defmodule PartyLineWeb.LandingLive do
     ~H"""
     <div class="retro-desktop">
       <.skin_toggle />
-      <Tour.Components.tour tour={@tour} class="tour--party" />
       <pre class="retro-crash retro-crash--1" aria-hidden="true">{crash(1)}</pre>
       <pre class="retro-crash retro-crash--2" aria-hidden="true">{crash(2)}</pre>
       <pre class="retro-crash retro-crash--3" aria-hidden="true">{crash(3)}</pre>
@@ -145,7 +138,6 @@ defmodule PartyLineWeb.LandingLive do
 
           <p class="retro-tourline">
             never done this before? <.link navigate={~p"/tour"}>take the tour →</.link>
-            · <button type="button" class="retro-linkbtn" phx-click="show_me">show me around</button>
           </p>
 
           <div class="retro-grid">

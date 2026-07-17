@@ -3,7 +3,6 @@
 
 @import "tailwindcss" source(none);
 @import "phoenix-colocated/party_line/colocated.css";
-@import "../../../tour/priv/static/tour.css";
 @source "../css";
 @source "../js";
 @source "../../lib/party_line_web";
@@ -1218,76 +1217,3 @@ html[data-pl-theme="modern"] {
 }
 .retro-tourline a { color: #0000c0; }
 html[data-pl-theme="modern"] .retro-tourline a { color: #10a37f; }
-
-/* "show me around" — the way into a Tour tour from a page's own chrome */
-.retro-linkbtn {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  color: #0000c0;
-  text-decoration: underline;
-  cursor: pointer;
-}
-html[data-pl-theme="modern"] .retro-linkbtn { color: #10a37f; }
-
-.retro-showme {
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  z-index: 60;
-  padding: 6px 12px;
-  background: #c0c0c0;
-  border: 1px solid #000;
-  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #404040;
-  font: inherit;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-.retro-showme:active { box-shadow: inset -1px -1px 0 #fff, inset 1px 1px 0 #404040; }
-html[data-pl-theme="modern"] .retro-showme {
-  background: #fff;
-  border: 1px solid #ececf1;
-  border-radius: 999px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-}
-
-/* Tour wears the party line's clothes: same tokens, no selector fighting. */
-.tour--party {
-  --tour-veil: rgba(12, 24, 32, 0.66);
-  --tour-surface: #c0c0c0;
-  --tour-ink: #000;
-  --tour-ink-soft: #404040;
-  --tour-accent: #000080;
-  --tour-accent-ink: #fff;
-  --tour-radius: 0px;
-  --tour-shadow: 4px 4px 0 rgba(0, 0, 0, 0.45);
-  --tour-font: "Chicago", "Charcoal", "Geneva", "MS Sans Serif", "Tahoma", "Verdana", sans-serif;
-}
-.tour--party .tour-card {
-  border: 1px solid #000;
-  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #404040, var(--tour-shadow);
-}
-.tour--party .tour-btn {
-  border: 1px solid #000;
-  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #404040;
-}
-.tour--party .tour-btn:active {
-  box-shadow: inset -1px -1px 0 #fff, inset 1px 1px 0 #404040;
-}
-.tour--party .tour-btn--ghost { border-color: transparent; box-shadow: none; }
-
-html[data-pl-theme="modern"] .tour--party {
-  --tour-surface: #fff;
-  --tour-ink: #202123;
-  --tour-ink-soft: #6e6e80;
-  --tour-accent: #10a37f;
-  --tour-radius: 10px;
-  --tour-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.35);
-  --tour-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-}
-html[data-pl-theme="modern"] .tour--party .tour-card,
-html[data-pl-theme="modern"] .tour--party .tour-btn {
-  border: 0;
-  box-shadow: var(--tour-shadow);
-}

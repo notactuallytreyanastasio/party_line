@@ -14,8 +14,6 @@ defmodule PartyLineWeb.FrontpageLive do
 
   @impl true
   def mount(_params, session, socket) do
-    socket = Tour.attach(socket, :boards, PartyLineWeb.Tours.boards())
-
     if connected?(socket), do: Boards.subscribe()
     voter = session["boards_voter"] || anon()
 
@@ -42,10 +40,6 @@ defmodule PartyLineWeb.FrontpageLive do
   end
 
   @impl true
-  def handle_event("show_me", _params, socket) do
-    {:noreply, Tour.start(socket, :boards)}
-  end
-
   def handle_event("vote", %{"id" => id, "dir" => dir}, socket) do
     Boards.vote(Boards, socket.assigns.voter, id, String.to_existing_atom(dir))
     {:noreply, socket}
@@ -73,8 +67,6 @@ defmodule PartyLineWeb.FrontpageLive do
     ~H"""
     <div class="retro-desktop retro-desktop--boards">
       <.skin_toggle />
-      <Tour.Components.tour tour={@tour} class="tour--party" />
-      <button type="button" class="retro-showme" phx-click="show_me">? show me around</button>
       <div class="retro-window retro-window--boards">
         <div class="retro-titlebar">
           <.link navigate={~p"/"} class="retro-close" aria-label="close, back to the exchange"></.link>
@@ -122,8 +114,6 @@ defmodule PartyLineWeb.FrontpageLive do
     ~H"""
     <div class="retro-desktop retro-desktop--boards">
       <.skin_toggle />
-      <Tour.Components.tour tour={@tour} class="tour--party" />
-      <button type="button" class="retro-showme" phx-click="show_me">? show me around</button>
       <div class="retro-window retro-window--boards">
         <div class="retro-titlebar">
           <.link navigate={~p"/boards"} class="retro-close" aria-label="back to the boards"></.link>
@@ -158,8 +148,6 @@ defmodule PartyLineWeb.FrontpageLive do
     ~H"""
     <div class="retro-desktop retro-desktop--boards">
       <.skin_toggle />
-      <Tour.Components.tour tour={@tour} class="tour--party" />
-      <button type="button" class="retro-showme" phx-click="show_me">? show me around</button>
       <div class="retro-window retro-window--boards">
         <div class="retro-titlebar">
           <.link navigate={~p"/boards"} class="retro-close"></.link>
