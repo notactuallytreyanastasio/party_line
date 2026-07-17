@@ -3,10 +3,9 @@ defmodule PartyLineWeb.FrontpageLiveTest do
   The boards' public face: the frontpage feed, per-board views, permalinks,
   and live voting over PubSub.
 
-  These drive the app-started `PartyLine.Boards` server, whose event log is
-  the default DETS file (test config sets no `:boards_path`), so every post
-  uses run-unique bodies/topics — the same accepted trade-off as the clips
-  wall tests.
+  These drive the app-started `PartyLine.Boards` server, which is in-memory and
+  shared across the app, so every post uses run-unique bodies/topics to stay
+  independent — the same accepted trade-off as the clips wall tests.
   """
   use ExUnit.Case, async: false
 
@@ -18,6 +17,7 @@ defmodule PartyLineWeb.FrontpageLiveTest do
   @endpoint PartyLineWeb.Endpoint
 
   setup do
+    PartyLine.DataCase.checkout_singletons!()
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 
@@ -135,5 +135,73 @@ defmodule PartyLineWeb.FrontpageLiveTest do
     {:ok, _} = Boards.vote("other-voter-#{uniq}", post.id, :up)
 
     assert score_for(render(view), post.id) == 1
+  end
+
+  describe "comments" do
+    test "a human can comment on a post and it renders live", %{conn: conn} do
+      uniq = System.unique_integer([:positive])
+
+      {:ok, post} =
+        Boards.submit(Boards, %{
+          board: "confessions",
+          topic: "comment-topic-#{uniq}",
+          author: "Horse Dentist",
+          body: "the molars knew"
+        })
+
+      {:ok, view, html} = live(conn, "/boards/#{post.id}")
+      assert html =~ "nobody&#39;s weighed in yet"
+
+      body = "big if true #{uniq}"
+      view |> element("form[phx-submit=\"comment\"]") |> render_submit(%{body: body})
+
+      html = render(view)
+      assert html =~ body
+      assert html =~ "1 comment"
+      refute html =~ "nobody&#39;s weighed in yet"
+    end
+
+    test "a comment from someone else shows up live over PubSub", %{conn: conn} do
+      uniq = System.unique_integer([:positive])
+
+      {:ok, post} =
+        Boards.submit(Boards, %{
+          board: "sagas",
+          topic: "live-comment-#{uniq}",
+          author: "erowid smoothie",
+          body: "part one of many"
+        })
+
+      {:ok, view, _html} = live(conn, "/boards/#{post.id}")
+
+      # a bot (or another tab) comments — the open permalink must update
+      {:ok, _} =
+        Boards.comment(Boards, %{
+          post_id: post.id,
+          author: "DigimonOtis",
+          body: "raccoon-adjacent take #{uniq}"
+        })
+
+      assert render(view) =~ "raccoon-adjacent take #{uniq}"
+      assert render(view) =~ "DigimonOtis"
+    end
+
+    test "the feed shows a comment count that updates", %{conn: conn} do
+      uniq = System.unique_integer([:positive])
+
+      {:ok, post} =
+        Boards.submit(Boards, %{
+          board: "trivia",
+          topic: "feed-count-#{uniq}",
+          author: "Beef Inspector",
+          body: "did you know"
+        })
+
+      {:ok, view, _html} = live(conn, "/boards/b/trivia")
+      # the row's comment chip starts at 0 and reflects new comments live
+      {:ok, _} = Boards.comment(Boards, %{post_id: post.id, author: "x", body: "first!"})
+
+      assert render(view) =~ "💬 1"
+    end
   end
 end

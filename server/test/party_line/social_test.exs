@@ -1,5 +1,7 @@
 defmodule PartyLine.SocialTest do
-  use ExUnit.Case, async: false
+  # DataCase for the sandbox: the clip wall persists to Postgres. Buddies and
+  # DMs are in-memory and just don't touch the checked-out connection.
+  use PartyLine.DataCase
 
   alias PartyLine.{Buddies, Clips, DMs}
 
@@ -127,10 +129,8 @@ defmodule PartyLine.SocialTest do
 
   describe "clips" do
     setup do
-      path = Path.join(System.tmp_dir!(), "clips-test-#{System.unique_integer([:positive])}.dets")
-      {:ok, clips} = Clips.start_link(name: nil, path: path)
-      on_exit(fn -> File.rm(path) end)
-      %{clips: clips, path: path}
+      {:ok, clips} = Clips.start_link(name: nil)
+      %{clips: clips}
     end
 
     test "clip, laugh, and rank the wall", %{clips: clips} do
@@ -159,13 +159,18 @@ defmodule PartyLine.SocialTest do
       assert runner_up.id == first.id
     end
 
-    test "clips survive a restart", %{clips: clips, path: path} do
-      messages = [%{sender_name: "Beef Inspector", kind: :bot, body: "graded: Prime", ts: "t"}]
-      {:ok, _} = Clips.clip(clips, messages, %{room_id: "room-x", clipped_by: "bobdawg"})
-      GenServer.stop(clips)
+    test "a clip is durable in Postgres — a fresh cache warms from the row", %{clips: clips} do
+      messages = [
+        %{sender_name: "coupon warlock", kind: :bot, body: "the SAVING RITUAL", ts: "t"}
+      ]
 
-      {:ok, reopened} = Clips.start_link(name: nil, path: path)
-      assert [%{messages: [%{body: "graded: Prime"}]}] = Clips.wall(reopened)
+      {:ok, saved} = Clips.clip(clips, messages, %{room_id: "room-x", clipped_by: "bobdawg"})
+
+      # a brand-new instance warms its cache from the same (sandboxed) DB and
+      # finds the clip — proof it was persisted, not just cached in the first
+      {:ok, fresh} = Clips.start_link(name: nil)
+      assert [%{id: id}] = Clips.wall(fresh)
+      assert id == saved.id
     end
 
     test "get returns the stored clip by id and nil for unknown ids", %{clips: clips} do

@@ -10,6 +10,7 @@ defmodule PartyLineWeb.RoomLiveTest do
   @endpoint PartyLineWeb.Endpoint
 
   setup do
+    PartyLine.DataCase.checkout_singletons!()
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 
@@ -120,8 +121,8 @@ defmodule PartyLineWeb.RoomLiveTest do
     assert html =~ "clipper"
     assert html =~ "screen name: receiver"
 
-    # someone says something worth keeping (unique per run: the clips DETS
-    # file survives across test runs by design)
+    # someone says something worth keeping (unique per run: the shared in-memory
+    # clips wall persists across tests within a run)
     uniq = System.unique_integer([:positive])
     body = "unique-clip-body-#{uniq}"
     note = "lmaoo-#{uniq}"

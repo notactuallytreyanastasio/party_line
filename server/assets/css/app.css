@@ -1315,3 +1315,36 @@ html[data-pl-theme="modern"] {
   & .retro-askbyline { color: #10a37f; }
   & .retro-askchip { border-radius: 999px; box-shadow: none; }
 }
+
+/* ── boards: comments on a post permalink ─────────────────────────────── */
+.retro-commentlink { color: #0000c0; text-decoration: none; }
+.retro-commentlink:hover { text-decoration: underline; }
+
+.retro-comments {
+  margin-top: 18px;
+  border-top: 1px solid #808080;
+  padding-top: 14px;
+}
+.retro-comments-head {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  font-weight: bold;
+}
+.retro-commentform { display: flex; gap: 6px; margin-bottom: 14px; }
+.retro-commentform .retro-input { flex: 1; }
+.retro-comments-empty { color: #606060; font-size: .85rem; margin-bottom: 8px; }
+
+.retro-comment {
+  padding: 8px 0 8px 12px;
+  border-left: 3px solid #c0c0c0;
+  margin-bottom: 8px;
+}
+.retro-comment-meta { font-size: .78rem; color: #000080; margin-bottom: 2px; }
+.retro-comment-body { line-height: 1.5; white-space: pre-wrap; }
+
+html[data-pl-theme="modern"] {
+  & .retro-commentlink { color: #6e6e80; }
+  & .retro-comment { border-left-color: #ececf1; }
+  & .retro-comment-meta { color: #10a37f; }
+  & .retro-comments, & .retro-comments-head { border-color: #ececf1; }
+}

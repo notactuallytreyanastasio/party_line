@@ -90,6 +90,17 @@ config :party_line, :lines, [
   {"room-observatory", "what's actually up there tonight, no equipment required"}
 ]
 
+# Postgres: the durable store behind the boards/clip ETS caches. Local brew
+# postgres runs trust-auth for the current OS user with no password.
+config :party_line, PartyLine.Repo,
+  username: System.get_env("PGUSER") || System.get_env("USER") || "postgres",
+  password: System.get_env("PGPASSWORD") || "",
+  hostname: System.get_env("PGHOST") || "localhost",
+  database: "party_line_dev",
+  stacktrace: true,
+  show_sensitive_data_on_connection_error: true,
+  pool_size: 10
+
 # boards posting scheduler on in dev (off by default)
 config :party_line, :scheduler, enabled: true
 

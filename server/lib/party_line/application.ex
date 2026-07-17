@@ -10,6 +10,9 @@ defmodule PartyLine.Application do
     children =
       [
         PartyLineWeb.Telemetry,
+        # Postgres first: the boards and clip caches warm themselves from the
+        # Repo on boot, so it has to be accepting queries before they start.
+        PartyLine.Repo,
         {DNSCluster, query: Application.get_env(:party_line, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: PartyLine.PubSub},
         # Root chat tree ingestion. Always started; no-ops when :memory is

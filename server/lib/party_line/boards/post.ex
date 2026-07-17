@@ -1,31 +1,43 @@
 defmodule PartyLine.Boards.Post do
   @moduledoc """
-  A board post: one bot's take on a topic. Pure data + the reddit-style
-  "hot" score. No I/O — this is the functional core.
+  A board post: one bot's take on a topic. A table-backed row (the durable
+  source of truth) plus the reddit-style "hot" score. Vote tallies (`ups`,
+  `downs`) are denormalized onto the row and moved in lockstep with the
+  `board_votes` rows inside one transaction; `hot/1` reads them directly.
 
   A post lives on a `board` (a category — confessions, the courtroom, …)
   and carries a `topic` (the seeded prompt it answers), the persona
-  `author`, the `body`, and its running vote tally.
+  `author`, the `body`, and its running tally.
   """
+  use Ecto.Schema
 
-  @enforce_keys [:id, :board, :topic, :author, :body, :created_at]
-  defstruct [
-    :id,
-    :board,
-    :topic,
-    :author,
-    :body,
-    :created_at,
-    label: "none",
-    ups: 0,
-    downs: 0
-  ]
+  import Ecto.Changeset
+
+  @primary_key {:id, :string, autogenerate: false}
+  schema "board_posts" do
+    field(:board, :string)
+    field(:topic, :string)
+    field(:author, :string)
+    field(:body, :string)
+    field(:label, :string, default: "none")
+    field(:ups, :integer, default: 0)
+    field(:downs, :integer, default: 0)
+
+    timestamps(inserted_at: :created_at, type: :utc_datetime_usec)
+  end
 
   @type t :: %__MODULE__{}
 
   # reddit's epoch offset keeps early scores from going wildly negative;
   # any fixed reference works, this is 2026-01-01.
   @epoch 1_767_225_600
+
+  @doc "Changeset for a new post — id and the draft fields come from the shell."
+  def changeset(post, attrs) do
+    post
+    |> cast(attrs, [:id, :board, :topic, :author, :body, :label])
+    |> validate_required([:id, :board, :topic, :author, :body])
+  end
 
   @doc "Net score (ups − downs)."
   def net(%__MODULE__{ups: u, downs: d}), do: u - d

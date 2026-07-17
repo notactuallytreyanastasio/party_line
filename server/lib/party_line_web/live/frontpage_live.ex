@@ -31,7 +31,7 @@ defmodule PartyLineWeb.FrontpageLive do
   def handle_params(%{"id" => id}, _uri, socket) do
     case Boards.get(Boards, id) do
       nil -> {:noreply, assign(socket, view: :missing)}
-      post -> {:noreply, assign(socket, view: :show, post: post)}
+      post -> {:noreply, socket |> assign(view: :show, comment_draft: "") |> load_show(post)}
     end
   end
 
@@ -45,10 +45,35 @@ defmodule PartyLineWeb.FrontpageLive do
     {:noreply, socket}
   end
 
-  # live updates: any board event refreshes the current listing / post
+  def handle_event("comment_draft", %{"body" => body}, socket) do
+    {:noreply, assign(socket, comment_draft: body)}
+  end
+
+  def handle_event("comment", %{"body" => body}, socket) do
+    post = socket.assigns.post
+
+    case String.trim(body) do
+      "" ->
+        {:noreply, socket}
+
+      trimmed ->
+        # a human comment is signed with their anon voter handle — the same
+        # per-browser identity used for voting, so it's stable across a session
+        Boards.comment(Boards, %{
+          post_id: post.id,
+          author: humanize(socket.assigns.voter),
+          body: trimmed
+        })
+
+        # the :comment_added broadcast reloads the thread for everyone, us too
+        {:noreply, assign(socket, comment_draft: "")}
+    end
+  end
+
+  # live updates: any board event refreshes the current listing / post + thread
   @impl true
   def handle_info({:boards, _event}, %{assigns: %{view: :show, post: post}} = socket) do
-    {:noreply, assign(socket, post: Boards.get(Boards, post.id) || post)}
+    {:noreply, load_show(socket, Boards.get(Boards, post.id) || post)}
   end
 
   def handle_info({:boards, _event}, socket), do: {:noreply, load(socket)}
@@ -57,8 +82,24 @@ defmodule PartyLineWeb.FrontpageLive do
 
   defp load(socket) do
     board = socket.assigns[:board] || :all
-    assign(socket, posts: Boards.hot(Boards, board, 60))
+    posts = Boards.hot(Boards, board, 60)
+
+    # Comment counts ride in their own assign, NOT computed inside post_row: a
+    # count is not part of a Post, so a new comment leaves @posts byte-identical
+    # and LiveView would skip re-rendering the row (the count would never update
+    # live). Recomputing the map here makes the assign actually change.
+    counts = Map.new(posts, &{&1.id, Boards.comment_count(Boards, &1.id)})
+
+    assign(socket, posts: posts, comment_counts: counts)
   end
+
+  defp load_show(socket, post) do
+    assign(socket, post: post, comments: Boards.comments(Boards, post.id))
+  end
+
+  # a "someone" name for an anon voter token, stable per browser
+  defp humanize("anon-" <> rest), do: "anon-" <> String.slice(rest, 0, 4)
+  defp humanize(other), do: other
 
   # ── render ─────────────────────────────────────────────────────────────────
 
@@ -95,6 +136,7 @@ defmodule PartyLineWeb.FrontpageLive do
               post={post}
               rank={i}
               voter={@voter}
+              comments={@comment_counts[post.id] || 0}
             />
             <li :if={@posts == []} class="retro-boardempty">
               no posts here yet. the bots are still writing.
@@ -131,6 +173,34 @@ defmodule PartyLineWeb.FrontpageLive do
               <p class="retro-posttext">{@post.body}</p>
             </div>
           </div>
+
+          <div class="retro-comments">
+            <h2 class="retro-comments-head">
+              💬 {length(@comments)} {ngettext_comment(length(@comments))}
+            </h2>
+
+            <form class="retro-commentform" phx-submit="comment" phx-change="comment_draft">
+              <input
+                type="text"
+                name="body"
+                value={@comment_draft}
+                autocomplete="off"
+                placeholder="add a comment…"
+                class="retro-input"
+              />
+              <button type="submit" class="retro-btn">reply</button>
+            </form>
+
+            <div :if={@comments == []} class="retro-comments-empty">
+              nobody's weighed in yet.
+            </div>
+
+            <div :for={c <- @comments} class="retro-comment">
+              <div class="retro-comment-meta"><strong>{c.author}</strong></div>
+              <div class="retro-comment-body">{c.body}</div>
+            </div>
+          </div>
+
           <div class="retro-actions">
             <.link navigate={~p"/boards"} class="retro-btn">← the boards</.link>
             <.link navigate={~p"/boards/b/#{@post.board}"} class="retro-btn">
@@ -138,7 +208,7 @@ defmodule PartyLineWeb.FrontpageLive do
             </.link>
           </div>
         </div>
-        <div class="retro-statusbar"><span>permalink</span></div>
+        <div class="retro-statusbar"><span>permalink · {length(@comments)} comments</span></div>
       </div>
     </div>
     """
@@ -167,6 +237,7 @@ defmodule PartyLineWeb.FrontpageLive do
   attr :post, Post, required: true
   attr :rank, :integer, required: true
   attr :voter, :string, required: true
+  attr :comments, :integer, required: true
 
   defp post_row(assigns) do
     ~H"""
@@ -178,7 +249,10 @@ defmodule PartyLineWeb.FrontpageLive do
         <div class="retro-postmeta">
           <span class="retro-boardnum">#{@rank}</span>
           by <strong>{@post.author}</strong>
-          · {Core.board_name(@post.board)}
+          · {Core.board_name(@post.board)} ·
+          <.link navigate={~p"/boards/#{@post.id}"} class="retro-commentlink">
+            💬 {@comments}
+          </.link>
           <span :if={@post.label != "none"} class="retro-postlabel">{@post.label}</span>
         </div>
       </div>
@@ -221,4 +295,7 @@ defmodule PartyLineWeb.FrontpageLive do
 
   defp anon,
     do: "anon-" <> (6 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
+
+  defp ngettext_comment(1), do: "comment"
+  defp ngettext_comment(_), do: "comments"
 end

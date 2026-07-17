@@ -1,8 +1,14 @@
 defmodule PartyLine.Boards.SchedulerTest do
-  use ExUnit.Case, async: true
+  # non-async: the shell tests drive a Boards instance that persists to
+  # Postgres, so they run under a shared-mode sandbox.
+  use ExUnit.Case, async: false
 
   alias PartyLine.Boards
   alias PartyLine.Boards.{Scheduler, SchedulerPolicy}
+
+  setup do
+    PartyLine.DataCase.checkout_singletons!()
+  end
 
   describe "policy (pure)" do
     test "stalest board wins — empty boards first, then oldest" do
@@ -125,13 +131,7 @@ defmodule PartyLine.Boards.SchedulerTest do
 
   describe "the loop (shell with fakes)" do
     setup do
-      path =
-        Path.join(System.tmp_dir!(), "sched-boards-#{System.unique_integer([:positive])}.dets")
-
-      {:ok, boards} =
-        Boards.start_link(name: nil, path: path, table: :"b#{System.unique_integer([:positive])}")
-
-      on_exit(fn -> File.rm(path) end)
+      {:ok, boards} = Boards.start_link(name: nil)
       %{boards: boards}
     end
 

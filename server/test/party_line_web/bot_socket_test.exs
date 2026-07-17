@@ -105,6 +105,13 @@ defmodule PartyLineWeb.BotSocketTest do
     end
   end
 
+  # the compose loop lands a real post on the boards (Postgres), and it runs in
+  # endpoint processes — shared-mode sandbox lets them see this test's rolled-
+  # back connection.
+  setup do
+    PartyLine.DataCase.checkout_singletons!()
+  end
+
   defp type(t), do: fn frame -> frame["type"] == t end
 
   defp fresh_room do

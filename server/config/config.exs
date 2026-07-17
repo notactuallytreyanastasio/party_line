@@ -8,6 +8,7 @@
 import Config
 
 config :party_line,
+  ecto_repos: [PartyLine.Repo],
   generators: [timestamp_type: :utc_datetime]
 
 # ROOT CHAT TREE ingestion into the central deciduous graph over HTTP.

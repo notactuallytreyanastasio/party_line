@@ -31,7 +31,13 @@ defmodule PartyLineWeb.ConnCase do
     end
   end
 
-  setup _tags do
+  setup tags do
+    # Boards votes/comments and clips persist through their GenServers, so a
+    # LiveView test that triggers a write needs the DB. Shared-mode sandbox
+    # (non-async cases) lets those processes see the test's rolled-back
+    # connection; read-only async tests get an isolated connection they may
+    # never touch.
+    PartyLine.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 end

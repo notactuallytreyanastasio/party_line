@@ -1,5 +1,16 @@
 import Config
 
+# The test database. Each partition (MIX_TEST_PARTITION) gets its own DB, and
+# the SQL sandbox wraps every test in a rolled-back transaction so the real
+# Postgres stays pristine across the suite — we never mock the Repo.
+config :party_line, PartyLine.Repo,
+  username: System.get_env("PGUSER") || System.get_env("USER") || "postgres",
+  password: System.get_env("PGPASSWORD") || "",
+  hostname: System.get_env("PGHOST") || "localhost",
+  database: "party_line_test#{System.get_env("MIX_TEST_PARTITION")}",
+  pool: Ecto.Adapters.SQL.Sandbox,
+  pool_size: System.schedulers_online() * 2
+
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
 config :party_line, PartyLineWeb.Endpoint,
@@ -38,8 +49,3 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
-
-# clips live in a throwaway file, fresh per test run
-config :party_line,
-       :clips_path,
-       System.tmp_dir!() <> "/party_line_test_clips_#{System.os_time(:millisecond)}.dets"

@@ -9,6 +9,7 @@ defmodule PartyLineWeb.BoardsLiveTest do
   @endpoint PartyLineWeb.Endpoint
 
   setup do
+    PartyLine.DataCase.checkout_singletons!()
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
 
