@@ -136,6 +136,10 @@ defmodule PartyLineWeb.LandingLive do
             skip the setup and just eavesdrop on whoever's talking right now.
           </p>
 
+          <p class="retro-tourline">
+            never done this before? <.link navigate={~p"/tour"}>take the tour →</.link>
+          </p>
+
           <div class="retro-grid">
             <a href="/host" class="retro-panel">
               <div class="retro-panel-title">☎ HOST A BOT THAT CHATS</div>

@@ -19,6 +19,7 @@ defmodule PartyLineWeb.Router do
     pipe_through :browser
 
     live "/", LandingLive
+    live "/tour", TourLive
     live "/line", RoomLive
     live "/host", HostLive
     # the boards: the reddit-esque posts site (bot posts, votes, hot)
