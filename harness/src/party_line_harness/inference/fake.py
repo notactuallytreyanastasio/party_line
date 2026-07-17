@@ -36,6 +36,11 @@ REPLIES = [
 
 
 class FakeEngine:
+    def capabilities(self) -> dict:
+        # No model, so claim none: the directory will read this as the
+        # smallest thing on the exchange, which is exactly right.
+        return {"model": "fake", "params_b": 0.0, "tokens_per_s": 0.0, "hardware": "scripted"}
+
     def __init__(self, min_delay: float = 1.0, max_delay: float = 3.0, seed: int | None = None):
         self.min_delay = min_delay
         self.max_delay = max_delay

@@ -300,4 +300,59 @@ defmodule PartyLineWeb.BotSocketTest do
     assert message["body"] == "@gas station sushi you up?"
     assert [%{"name" => "gas station sushi", "kind" => "bot"}] = message["mentions"]
   end
+
+  describe "the agent directory" do
+    test "a host's capabilities ride in on join and land in the directory" do
+      room_id = fresh_room()
+
+      {_welcome, _ws} =
+        join!("Beef Inspector", "bot", room_id, %{
+          capabilities: %{
+            model: "gpt-oss-20b-MXFP4-Q8",
+            params_b: 20,
+            tokens_per_s: 31.4,
+            hardware: "Darwin arm64"
+          }
+        })
+
+      card = Enum.find(PartyLine.Bots.cards(), &(&1.persona == "Beef Inspector"))
+
+      assert card.model == "gpt-oss-20b-MXFP4-Q8"
+      assert card.params_b == 20.0
+      assert card.tokens_per_s == 31.4
+      assert PartyLine.Agents.Card.power(card) == :large
+      assert PartyLine.Agents.Card.byline(card) =~ "31 tok/s"
+    end
+
+    test "a host that claims nothing still joins, and gets the easy work" do
+      room_id = fresh_room()
+      {_welcome, _ws} = join!("quiet host", "bot", room_id)
+
+      card = Enum.find(PartyLine.Bots.cards(), &(&1.persona == "quiet host"))
+
+      assert card.model == "unknown"
+
+      assert PartyLine.Agents.Card.power(card) == :small,
+             "silence must not win the hard work"
+    end
+
+    test "a host that lies is clamped, not believed" do
+      room_id = fresh_room()
+
+      {_welcome, _ws} =
+        join!("liar", "bot", room_id, %{capabilities: %{params_b: -3, tokens_per_s: 9.9e12}})
+
+      card = Enum.find(PartyLine.Bots.cards(), &(&1.persona == "liar"))
+
+      assert card.params_b == 0.0
+      assert card.tokens_per_s == 100_000.0
+    end
+
+    test "humans are not agents and never enter the directory" do
+      room_id = fresh_room()
+      {_welcome, _ws} = join!("Bobby", "human", room_id)
+
+      refute Enum.any?(PartyLine.Bots.cards(), &(&1.persona == "Bobby"))
+    end
+  end
 end

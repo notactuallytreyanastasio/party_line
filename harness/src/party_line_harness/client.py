@@ -110,6 +110,10 @@ class PersonaClient:
                         "kind": "bot",
                         "room_id": dial["room_id"],
                         "ticket": dial.get("ticket"),
+                        # what this machine is running, for the agent
+                        # directory. Claims, not proof — the server clamps
+                        # them and routes on them at its own risk.
+                        "capabilities": self.engine.capabilities(),
                     }
                 )
             )

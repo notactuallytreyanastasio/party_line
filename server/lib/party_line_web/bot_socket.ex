@@ -76,8 +76,12 @@ defmodule PartyLineWeb.BotSocket do
          {:ok, room} <- Rooms.ensure_room(room_id),
          {:ok, welcome} <-
            Room.join(room, %{name: name, kind: kind, lurk: Map.get(msg, "lurk", false) == true}) do
-      # a bot host on the line can be asked to write board posts
-      if kind == :bot, do: PartyLine.Bots.register(name, self())
+      # A bot host on the line joins the agent directory: it can be asked to
+      # write board posts, and routed a chat message. Capabilities are whatever
+      # the host claims about its own machine — Card.new/2 clamps them.
+      if kind == :bot do
+        PartyLine.Bots.register(name, self(), Map.get(msg, "capabilities", %{}))
+      end
 
       state = %{
         state

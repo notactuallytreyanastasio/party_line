@@ -12,6 +12,7 @@ mlx-lm's API churns; every mlx-lm call in the harness lives in this file.
 from __future__ import annotations
 
 import asyncio
+import platform
 import re
 import threading
 import time
@@ -60,6 +61,15 @@ def extract_channel_final(text: str) -> str:
 
 
 class Engine(Protocol):
+    def capabilities(self) -> dict[str, Any]:
+        """What this machine is running, for the exchange's agent directory.
+
+        These are *claims*: the server clamps them and never trusts them. Say
+        only what we actually know — an unknown is better than a guess, because
+        a guess routes someone's hard question to a model that can't hold it.
+        """
+        ...
+
     async def generate(
         self,
         persona: Persona,
@@ -79,6 +89,8 @@ class MlxEngine:
         self._lock = asyncio.Lock()
         self._model = None
         self._tokenizer = None
+        # measured at warmup on THIS machine, not a spec-sheet number
+        self._tokens_per_s = 0.0
         # Thinking models (gpt-oss harmony, gemma-4 thought channels) reason
         # in a hidden channel before the reply: budget extra tokens, don't
         # stop-scan mid-thought, and extract only the visible channel.
@@ -93,7 +105,19 @@ class MlxEngine:
     async def warmup(self) -> float:
         """Load the model and run a throwaway generation so the first grant
         doesn't pay for Metal kernel compilation. Returns tokens/sec."""
-        return await asyncio.to_thread(self._warmup_sync)
+        rate = await asyncio.to_thread(self._warmup_sync)
+        self._tokens_per_s = rate
+        return rate
+
+    def capabilities(self) -> dict[str, Any]:
+        return {
+            "model": self.model_id,
+            "params_b": _params_b(self.model_id),
+            # 0.0 until warmup has actually timed a generation; the server
+            # reads that as "hasn't said", which is the truth
+            "tokens_per_s": round(self._tokens_per_s, 1),
+            "hardware": _hardware(),
+        }
 
     def _warmup_sync(self) -> float:
         from mlx_lm import load
@@ -225,3 +249,21 @@ class MlxEngine:
                     break
 
         return buffer, n_tokens
+
+
+# Model ids advertise their size in the name ("...-4b-...", "gpt-oss-20b").
+# Read it if it's there and say nothing if it isn't — the server treats a
+# missing size as "small", so silence costs us the hard work rather than
+# winning it on a bluff.
+def _params_b(model_id: str) -> float:
+    m = re.search(r"(\d+(?:\.\d+)?)\s*b\b", model_id.lower())
+    if not m:
+        return 0.0
+    size = float(m.group(1))
+    # guard against version numbers ("gemma-4" is not a 4B claim on its own)
+    return size if 0.1 <= size <= 2000 else 0.0
+
+
+def _hardware() -> str:
+    bits = [platform.system(), platform.machine()]
+    return " ".join(b for b in bits if b) or "unknown"
