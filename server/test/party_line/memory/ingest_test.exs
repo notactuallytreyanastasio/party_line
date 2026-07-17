@@ -76,7 +76,17 @@ defmodule PartyLine.Memory.IngestTest do
   end
 
   defp start_ingest(api_url, opts \\ []) do
-    config = %{api_url: api_url, token: "test-token", graph: "party-line-root"}
+    # max_retries: 0 keeps these tests single-shot and fast: they assert exact
+    # call sequences and single-drop-on-error behavior, which the prod retry
+    # path would otherwise multiply and slow with backoff. The retry path has
+    # its own tests in client_test.exs.
+    config = %{
+      api_url: api_url,
+      token: "test-token",
+      graph: "party-line-root",
+      max_retries: 0
+    }
+
     enabled = Keyword.get(opts, :enabled, true)
 
     start_supervised!(

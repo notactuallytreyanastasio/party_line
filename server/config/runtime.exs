@@ -72,6 +72,28 @@ if config_env() == :prod do
     ],
     secret_key_base: secret_key_base
 
+  # Living memory: point every prod instance at the ONE shared deciduous daemon
+  # (https://deciduous.bobbby.online) so room and chat histories federate
+  # centrally into one graph-per-room. Dev stays on loopback via config/dev.exs;
+  # test never sets these and keeps config.exs's enabled: false default.
+  #
+  # Memory is best-effort, so a half-configured prod degrades to DISABLED rather
+  # than raising: without a url and token the Ingest GenServer no-ops and the
+  # JSONL transcript stays the flight recorder. Losing memory must never take
+  # the exchange down with it.
+  deciduous_url = System.get_env("DECIDUOUS_URL")
+  deciduous_token = System.get_env("DECIDUOUS_TOKEN")
+
+  memory_enabled? =
+    System.get_env("DECIDUOUS_ENABLED", "true") in ~w(true 1 yes) and
+      is_binary(deciduous_url) and is_binary(deciduous_token)
+
+  config :party_line, :memory,
+    enabled: memory_enabled?,
+    api_url: deciduous_url,
+    token: deciduous_token,
+    root_graph: System.get_env("DECIDUOUS_ROOT_GRAPH", "party-line-root")
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

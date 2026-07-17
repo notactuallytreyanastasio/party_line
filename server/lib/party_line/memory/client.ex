@@ -16,14 +16,26 @@ defmodule PartyLine.Memory.Client do
     data is `{"is_error": bool, "result": <tool payload>}`.
   """
 
-  @timeout 2_000
+  # Loopback used 2s with no retries. Prod dials a shared deciduous over the
+  # public internet (https://deciduous.bobbby.online), so timeouts widen and
+  # transient failures retry with backoff. These are defaults; a caller or test
+  # can override any by putting the same key in the config map, which already
+  # flows through every function here.
+  @receive_timeout 15_000
+  @connect_timeout 10_000
+  @max_retries 2
+
+  # Retry only genuinely transient statuses. 404 is DELIBERATELY excluded:
+  # PartyLine.Memory.Ingest reads a 404 as "the graph vanished" and re-creates
+  # it, so a 404 must surface on the first try, never be retried away.
+  @retry_statuses [408, 429, 500, 502, 503, 504]
 
   @type config :: %{api_url: String.t(), token: String.t(), graph: String.t()}
 
   @doc "Create (or confirm) the graph. Idempotent server-side."
   @spec ensure_graph(config()) :: :ok | {:error, term()}
-  def ensure_graph(%{api_url: api_url, token: token, graph: graph}) do
-    case request(:put, "#{api_url}/api/v1/graphs/#{graph}", token, nil) do
+  def ensure_graph(%{api_url: api_url, graph: graph} = config) do
+    case request(:put, "#{api_url}/api/v1/graphs/#{graph}", config, nil) do
       {:ok, _status, _body} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -64,10 +76,10 @@ defmodule PartyLine.Memory.Client do
 
   # ── internals ────────────────────────────────────────────────────────────
 
-  defp tool(%{api_url: api_url, token: token}, graph, tool, args) do
+  defp tool(%{api_url: api_url} = config, graph, tool, args) do
     url = "#{api_url}/api/v1/graphs/#{graph}/tools/#{tool}"
 
-    case request(:post, url, token, args) do
+    case request(:post, url, config, args) do
       {:ok, _status, %{"ok" => true, "data" => %{"is_error" => false} = data}} ->
         {:ok, Map.get(data, "result")}
 
@@ -85,15 +97,18 @@ defmodule PartyLine.Memory.Client do
     end
   end
 
-  defp request(method, url, token, body) do
+  defp request(method, url, config, body) do
     opts =
       [
         method: method,
         url: url,
-        headers: [{"authorization", "Bearer #{token}"}],
-        receive_timeout: @timeout,
-        connect_options: [timeout: @timeout],
-        retry: false
+        headers: [{"authorization", "Bearer #{config.token}"}],
+        receive_timeout: Map.get(config, :receive_timeout, @receive_timeout),
+        connect_options: [timeout: Map.get(config, :connect_timeout, @connect_timeout)],
+        retry: &retry?/2,
+        retry_delay: Map.get(config, :retry_delay, &backoff/1),
+        max_retries: Map.get(config, :max_retries, @max_retries),
+        retry_log_level: false
       ]
       |> maybe_json(body)
 
@@ -110,6 +125,18 @@ defmodule PartyLine.Memory.Client do
   rescue
     e -> {:error, {:exception, Exception.message(e)}}
   end
+
+  # Req calls this per attempt. Retry transient statuses and any transport
+  # exception (connection refused, TLS handshake, receive timeout); everything
+  # else — crucially a 404 — is handed back to the caller on the first try, so
+  # Ingest's "graph vanished, re-create it" self-heal still fires.
+  defp retry?(_request, %Req.Response{status: status}), do: status in @retry_statuses
+  defp retry?(_request, exception) when is_exception(exception), do: true
+  defp retry?(_request, _other), do: false
+
+  # Exponential backoff with jitter, n 0-based: ~0.3s, ~0.6s. Kept short —
+  # Ingest processes events serially, so a retry stalls that room's queue.
+  defp backoff(n), do: trunc(:math.pow(2, n) * 300) + :rand.uniform(150)
 
   defp maybe_json(opts, nil), do: opts
   defp maybe_json(opts, body), do: Keyword.put(opts, :json, body)

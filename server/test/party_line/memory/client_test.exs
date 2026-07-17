@@ -35,8 +35,15 @@ defmodule PartyLine.Memory.ClientTest do
     config(port)
   end
 
+  # Single-shot by default so the envelope-branch tests stay fast; the retry
+  # behavior gets its own tests that opt back in with a zero-delay backoff.
   defp config(port) do
-    %{api_url: "http://127.0.0.1:#{port}", token: "test-token", graph: "party-line-root"}
+    %{
+      api_url: "http://127.0.0.1:#{port}",
+      token: "test-token",
+      graph: "party-line-root",
+      max_retries: 0
+    }
   end
 
   defp envelope(data), do: %{"ok" => true, "data" => data}
@@ -123,5 +130,81 @@ defmodule PartyLine.Memory.ClientTest do
     config = start_stub(200, envelope(%{"is_error" => false, "result" => %{}}))
 
     assert :ok = Client.link_nodes(config, %{from_id: 1, to_id: 2, rationale: "follows"})
+  end
+
+  # ── Retry: transient statuses retry, a 404 never does ─────────────────────
+  #
+  # A counting stub over a real socket, so the retry path is exercised end to
+  # end. Backoff is overridden to 0 so these stay fast.
+
+  defmodule Counter do
+    import Plug.Conn
+
+    def init(opts), do: opts
+
+    def call(conn, opts) do
+      {test, status} = {Keyword.fetch!(opts, :test), Keyword.fetch!(opts, :status)}
+      send(test, :hit)
+
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(status, Jason.encode!(%{"ok" => false, "error" => "boom"}))
+    end
+  end
+
+  defp counting(status) do
+    {:ok, srv} =
+      Bandit.start_link(
+        plug: {Counter, test: self(), status: status},
+        port: 0,
+        startup_log: false
+      )
+
+    on_exit(fn -> if Process.alive?(srv), do: Process.exit(srv, :normal) end)
+    {:ok, {_addr, port}} = ThousandIsland.listener_info(srv)
+
+    %{
+      api_url: "http://127.0.0.1:#{port}",
+      token: "t",
+      graph: "g",
+      max_retries: 2,
+      retry_delay: fn _ -> 0 end
+    }
+  end
+
+  defp hits do
+    hits(0)
+  end
+
+  defp hits(n) do
+    receive do
+      :hit -> hits(n + 1)
+    after
+      50 -> n
+    end
+  end
+
+  test "a 5xx is retried up to max_retries before giving up" do
+    config = counting(503)
+
+    assert {:error, {:http_status, 503, _}} = Client.add_node(config, %{title: "x"})
+    # original attempt + 2 retries
+    assert hits() == 3
+  end
+
+  test "a 404 is NOT retried — it must surface so Ingest can self-heal" do
+    config = counting(404)
+
+    assert {:error, {:http_status, 404, _}} = Client.add_node(config, %{title: "x"})
+
+    assert hits() == 1,
+           "retrying a 404 would swallow the 'graph vanished' signal Ingest depends on"
+  end
+
+  test "max_retries: 0 makes a transient failure single-shot" do
+    config = %{counting(500) | max_retries: 0}
+
+    assert {:error, _} = Client.add_node(config, %{title: "x"})
+    assert hits() == 1
   end
 end
