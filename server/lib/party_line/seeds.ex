@@ -18,11 +18,17 @@ defmodule PartyLine.Seeds do
   def start_link(opts),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, @name))
 
-  @doc "A random twisted topic, or nil if the corpus is empty."
-  def topic(server \\ @name), do: GenServer.call(server, :topic)
+  @doc """
+  A random topic string, or nil if the corpus is empty. By default only
+  `label: "none"` topics (safe for any room); pass `labels: :all` to
+  include nsfw/heavy, or a list like `["none", "heavy"]`.
+  """
+  def topic(server \\ @name, opts \\ []),
+    do: GenServer.call(server, {:topic, opts[:labels] || [:none]})
 
-  @doc "How many prompts are loaded."
-  def count(server \\ @name), do: GenServer.call(server, :count)
+  @doc "How many prompts are loaded (optionally filtered by label)."
+  def count(server \\ @name, opts \\ []),
+    do: GenServer.call(server, {:count, opts[:labels] || :all})
 
   # ── server ──────────────────────────────────────────────────────────────
 
@@ -33,41 +39,66 @@ defmodule PartyLine.Seeds do
   end
 
   @impl true
-  def handle_call(:topic, _from, %{topics: []} = state), do: {:reply, nil, state}
+  def handle_call({:topic, labels}, _from, state) do
+    case filter(state.topics, labels) do
+      [] -> {:reply, nil, state}
+      picks -> {:reply, Enum.random(picks).topic, state}
+    end
+  end
 
-  def handle_call(:topic, _from, %{topics: topics} = state),
-    do: {:reply, Enum.random(topics), state}
+  def handle_call({:count, labels}, _from, state),
+    do: {:reply, length(filter(state.topics, labels)), state}
 
-  def handle_call(:count, _from, state), do: {:reply, length(state.topics), state}
+  defp filter(topics, :all), do: topics
+
+  defp filter(topics, labels) do
+    wanted = labels |> List.wrap() |> Enum.map(&to_string/1) |> MapSet.new()
+    Enum.filter(topics, &MapSet.member?(wanted, &1.label))
+  end
 
   # ── corpus ──────────────────────────────────────────────────────────────
 
+  # Prefer the LLM-rephrased, labelled corpus (topics.jsonl) — it's already
+  # laundered and tagged. Fall back to the raw harvest (prompts.jsonl),
+  # which we scrub + twist mechanically on load.
   defp default_path do
     Application.get_env(:party_line, :seeds_path) ||
-      Path.expand("../../data/seeder/prompts.jsonl", __DIR__)
+      first_existing([
+        Path.expand("../../data/seeder/topics.jsonl", __DIR__),
+        Path.expand("../../data/seeder/prompts.jsonl", __DIR__)
+      ])
   end
+
+  defp first_existing(paths), do: Enum.find(paths, List.last(paths), &File.exists?/1)
 
   defp load(path) do
     case File.read(path) do
       {:ok, contents} ->
         contents
         |> String.split("\n", trim: true)
-        |> Enum.flat_map(&twist_line/1)
-        |> Enum.uniq()
+        |> Enum.flat_map(&parse_line/1)
+        |> Enum.uniq_by(&String.downcase(&1.topic))
 
       {:error, _} ->
         []
     end
   end
 
-  defp twist_line(line) do
-    with {:ok, %{"title" => title, "subreddit" => sub}} <- Jason.decode(line),
-         true <- sub in @known,
-         laundered = launder(title),
-         true <- laundered != "" do
-      [twist(sub, laundered)]
-    else
-      _ -> []
+  defp parse_line(line) do
+    case Jason.decode(line) do
+      # rephrased corpus: already-laundered {topic, label}
+      {:ok, %{"topic" => topic, "label" => label}} when is_binary(topic) ->
+        [%{topic: topic, label: label}]
+
+      # raw harvest: scrub + twist mechanically, tag as unknown-safety "none"
+      {:ok, %{"title" => title, "subreddit" => sub}} when sub in @known ->
+        case launder(title) do
+          "" -> []
+          laundered -> [%{topic: twist(sub, laundered), label: "none"}]
+        end
+
+      _ ->
+        []
     end
   end
 
