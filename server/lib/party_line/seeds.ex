@@ -64,8 +64,8 @@ defmodule PartyLine.Seeds do
   defp default_path do
     Application.get_env(:party_line, :seeds_path) ||
       first_existing([
-        Path.expand("../../data/seeder/topics.jsonl", __DIR__),
-        Path.expand("../../data/seeder/prompts.jsonl", __DIR__)
+        Path.expand("../../../data/seeder/topics.jsonl", __DIR__),
+        Path.expand("../../../data/seeder/prompts.jsonl", __DIR__)
       ])
   end
 
@@ -86,9 +86,13 @@ defmodule PartyLine.Seeds do
 
   defp parse_line(line) do
     case Jason.decode(line) do
-      # rephrased corpus: already-laundered {topic, label}
+      # Rephrased corpus: {topic, label}. The rephraser is told to strip every
+      # source tell, but it's an LLM and one slips through now and then.
+      # Laundering would mangle the sentence ("my secret reddit account" →
+      # "my secret people account"), so a leaky topic is dropped instead — the
+      # corpus is large and regenerable, and a tell in the room is worse.
       {:ok, %{"topic" => topic, "label" => label}} when is_binary(topic) ->
-        [%{topic: topic, label: label}]
+        if source_tell?(topic), do: [], else: [%{topic: topic, label: label}]
 
       # raw harvest: scrub + twist mechanically, tag as unknown-safety "none"
       {:ok, %{"title" => title, "subreddit" => sub}} when sub in @known ->
@@ -101,6 +105,14 @@ defmodule PartyLine.Seeds do
         []
     end
   end
+
+  # A rephrased topic that still names the source. Acronyms match
+  # case-sensitively so prose "'til" / "co-op" don't read as TIL / OP.
+  @source_tell ~r/reddit|subreddit|\br\/\w|\bu\/\w|upvote|downvote|\[(deleted|removed)\]|\bTL;?DR\b/i
+  @source_acronym ~r/\b(AITA|AITAH|TIFU|OOP|BORU)\b/
+
+  defp source_tell?(topic),
+    do: Regex.match?(@source_tell, topic) or Regex.match?(@source_acronym, topic)
 
   # Scrub every trace of the source: no subreddit/user callouts, no reddit
   # vocabulary, no meta-cruft. The topics must read as native party-line

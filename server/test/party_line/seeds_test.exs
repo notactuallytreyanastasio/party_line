@@ -69,4 +69,120 @@ defmodule PartyLine.SeedsTest do
     assert Seeds.count(empty) == 0
     assert Seeds.topic(empty) == nil
   end
+
+  describe "rephrased corpus ({topic, label} lines)" do
+    setup do
+      lines = [
+        %{topic: "what would you rename the moon", label: "none"},
+        %{topic: "the exchange rules on: borrowed lawnmowers", label: "none"},
+        %{topic: "a spicy one", label: "nsfw"},
+        %{topic: "a grim one", label: "heavy"}
+      ]
+
+      seeds = seeds_from_lines(Enum.map_join(lines, "\n", &Jason.encode!/1))
+      %{seeds: seeds}
+    end
+
+    test "default topic/2 serves only label none — nsfw/heavy stay out", %{seeds: seeds} do
+      drawn = for _ <- 1..40, do: Seeds.topic(seeds)
+
+      assert drawn |> Enum.uniq() |> Enum.sort() ==
+               ["the exchange rules on: borrowed lawnmowers", "what would you rename the moon"]
+    end
+
+    test "label filters: :all, a list, and count", %{seeds: seeds} do
+      assert Seeds.count(seeds) == 4
+      assert Seeds.count(seeds, labels: [:none]) == 2
+      assert Seeds.count(seeds, labels: ["none", "heavy"]) == 3
+      assert Seeds.topic(seeds, labels: ["nsfw"]) == "a spicy one"
+    end
+
+    test "topic is nil when no topic matches the requested labels", %{seeds: seeds} do
+      assert Seeds.topic(seeds, labels: ["mystery"]) == nil
+    end
+
+    test "a rephrased topic that still names the source is dropped, not served" do
+      lines = [
+        %{topic: "my pregnant wife found my secret reddit account", label: "none"},
+        %{topic: "tried pivoting a cynicism subreddit toward wholesomeness", label: "none"},
+        %{topic: "what if r/somewhere and u/someone had a baby", label: "none"},
+        %{topic: "the exchange rules on: AITA for eating the last tamale", label: "none"},
+        %{topic: "chased clout for upvotes on the front page", label: "none"},
+        %{topic: "the one clean survivor", label: "none"}
+      ]
+
+      seeds = seeds_from_lines(Enum.map_join(lines, "\n", &Jason.encode!/1))
+
+      assert Seeds.count(seeds, labels: :all) == 1
+      assert Seeds.topic(seeds) == "the one clean survivor"
+    end
+
+    test "prose that merely looks like an acronym survives the source-tell guard" do
+      # "'til"/"til" is until, and "co-op" is not a poster callout — a
+      # case-insensitive \bTIL\b / \bOP\b guard would eat both
+      lines = [
+        %{topic: "nobody noticed til the very end of the party", label: "none"},
+        %{topic: "the co-op intern invented fake bus stops", label: "none"},
+        %{topic: "most insane real-world karma you ever watched land", label: "none"}
+      ]
+
+      seeds = seeds_from_lines(Enum.map_join(lines, "\n", &Jason.encode!/1))
+
+      assert Seeds.count(seeds, labels: :all) == 3
+    end
+  end
+
+  describe "corpus loading edge cases" do
+    test "topics differing only by case dedupe to one" do
+      lines = [
+        %{topic: "The Moon Is A Lie", label: "none"},
+        %{topic: "the moon is a lie", label: "none"}
+      ]
+
+      seeds = seeds_from_lines(Enum.map_join(lines, "\n", &Jason.encode!/1))
+      assert Seeds.count(seeds) == 1
+    end
+
+    test "malformed lines are skipped without crashing" do
+      contents =
+        Enum.join(
+          [
+            "this is not json {",
+            Jason.encode!(%{unrelated: "shape"}),
+            Jason.encode!(%{topic: 123, label: "none"}),
+            Jason.encode!(%{topic: "the one survivor", label: "none"})
+          ],
+          "\n"
+        )
+
+      seeds = seeds_from_lines(contents)
+      assert Seeds.count(seeds) == 1
+      assert Seeds.topic(seeds) == "the one survivor"
+    end
+
+    test "BestofRedditorUpdates twists into whatever happened with" do
+      line = Jason.encode!(%{subreddit: "BestofRedditorUpdates", title: "the wedding cake saga"})
+      seeds = seeds_from_lines(line)
+
+      assert Seeds.topic(seeds) == "whatever happened with: the wedding cake saga"
+    end
+
+    test "a raw title that launders to nothing is dropped, not loaded empty" do
+      line = Jason.encode!(%{subreddit: "AskReddit", title: "AMA [deleted]"})
+      seeds = seeds_from_lines(line)
+
+      assert Seeds.count(seeds) == 0
+      assert Seeds.topic(seeds) == nil
+    end
+  end
+
+  defp seeds_from_lines(contents) do
+    path =
+      Path.join(System.tmp_dir!(), "seeds-case-#{System.unique_integer([:positive])}.jsonl")
+
+    File.write!(path, contents)
+    on_exit(fn -> File.rm(path) end)
+    {:ok, seeds} = Seeds.start_link(name: nil, path: path)
+    seeds
+  end
 end
