@@ -138,8 +138,36 @@ defmodule PartyLineWeb.RoomLive do
 
   def handle_event("dm_send", %{"buddy" => buddy, "body" => body}, socket) do
     body = String.trim(body)
-    if body != "", do: DMs.send_dm(socket.assigns.name, buddy, body)
+    if body != "", do: DMs.send_dm(socket.assigns.name, buddy, body, [])
     {:noreply, update_dm(socket, buddy, &%{&1 | draft: ""})}
+  end
+
+  # Stumble again: find somewhere to go, *then* hang up.
+  #
+  # The order is the whole point. Leaving first strands you when yours is the
+  # only live line — you'd be looking at a room you already walked out of, with
+  # nowhere to land. So the matchmaker draws first; only once it has dealt a new
+  # line do we leave the old one, which also keeps us out of the roster of a
+  # room we're no longer reading.
+  def handle_event("stumble_again", _params, socket) do
+    case Rooms.stumble(exclude: stumbled_from(socket)) do
+      {:error, :nowhere} ->
+        {:noreply,
+         assign(socket, error: "nowhere else to stumble — this is the only line that's live.")}
+
+      {:ok, room_id} ->
+        leave_all(socket)
+        open_switchboard(socket, socket.assigns.name, only: room_id)
+    end
+  end
+
+  defp leave_all(socket) do
+    for w <- socket.assigns.windows do
+      case Rooms.whereis(w.room_id) do
+        {:ok, room} -> Room.leave(room, w.participant_id)
+        {:error, :not_found} -> :ok
+      end
+    end
   end
 
   @impl true
@@ -213,19 +241,19 @@ defmodule PartyLineWeb.RoomLive do
 
   # ── Window bookkeeping ───────────────────────────────────────────────────
 
-  defp open_switchboard(socket, name) do
+  defp open_switchboard(socket, name, opts \\ []) do
     :ok = Rooms.ensure_lines()
 
     windows =
-      Rooms.switchboard_rooms()
-      |> Enum.take(@max_windows)
+      socket
+      |> lines_for(opts)
       |> Enum.with_index()
       |> Enum.map(fn {%{id: room_id}, index} -> join_line(socket, name, room_id, index) end)
       |> Enum.reject(&is_nil/1)
 
     case windows do
       [] ->
-        {:noreply, assign(socket, error: "no lines are answering. odd. try again.")}
+        {:noreply, assign(socket, error: no_lines_error(socket))}
 
       windows ->
         :ok = Buddies.register(name, self())
@@ -244,6 +272,30 @@ defmodule PartyLineWeb.RoomLive do
          |> assign(windows: Enum.map(windows, &Map.delete(&1, :transcript)))}
     end
   end
+
+  # The switchboard patches you into every line at once. A stumble is the
+  # opposite: one line, chosen by the matchmaker, and you don't get to know
+  # which until you land.
+  defp lines_for(_socket, only: room_id), do: one_line(room_id)
+
+  defp lines_for(%{assigns: %{live_action: :stumble}} = socket, _opts) do
+    case Rooms.stumble(exclude: stumbled_from(socket)) do
+      {:ok, room_id} -> one_line(room_id)
+      {:error, :nowhere} -> []
+    end
+  end
+
+  defp lines_for(_socket, _opts), do: Rooms.switchboard_rooms() |> Enum.take(@max_windows)
+
+  defp one_line(room_id), do: Enum.filter(Rooms.switchboard_rooms(), &(&1.id == room_id))
+
+  defp stumbled_from(%{assigns: %{windows: [%{room_id: id} | _]}}), do: [id]
+  defp stumbled_from(_socket), do: []
+
+  defp no_lines_error(%{assigns: %{live_action: :stumble}}),
+    do: "every line is quiet right now. nobody's bots are on. try again in a bit."
+
+  defp no_lines_error(_socket), do: "no lines are answering. odd. try again."
 
   defp join_line(_socket, name, room_id, index) do
     with {:ok, room} <- Rooms.whereis(room_id),
@@ -409,6 +461,15 @@ defmodule PartyLineWeb.RoomLive do
     <div class="retro-desktop retro-desktop--switchboard">
       <.skin_toggle />
       <pre class="retro-crash retro-directory" aria-hidden="true">{@directory}</pre>
+      <button
+        :if={@live_action == :stumble}
+        type="button"
+        class="retro-stumble-again"
+        phx-click="stumble_again"
+      >
+        ↻ stumble again
+      </button>
+      <p :if={@live_action == :stumble and @error} class="retro-stumble-note">{@error}</p>
       <div class="retro-switchboard-canvas">
         <div
           :for={window <- @windows}

@@ -7,6 +7,7 @@ defmodule PartyLine.Rooms do
   every caller already goes through it.
   """
 
+  alias PartyLine.Rooms.Matchmaker
   alias PartyLine.Rooms.Room
 
   @default_room "room-default"
@@ -121,6 +122,50 @@ defmodule PartyLine.Rooms do
     end)
     |> Enum.uniq_by(& &1.name)
     |> Enum.sort_by(&String.downcase(&1.name))
+  end
+
+  @doc """
+  Stumble into a live conversation: `{:ok, room_id}`, or `{:error, :nowhere}`
+  when every line is empty or asleep.
+
+  Deliberately *not* `dial/1`. Bots dial to reach a room they were told to
+  join, so that path must stay deterministic; a human stumbling wants to be
+  surprised, but not into an empty room. `PartyLine.Rooms.Matchmaker` owns the
+  odds — see the moduledoc for why they're weighted rather than uniform.
+
+  `:exclude` is the line you're already on. Options pass straight through.
+  """
+  def stumble(opts \\ []) do
+    :ok = ensure_lines()
+
+    case Matchmaker.pick(stumble_candidates(), opts) do
+      nil -> {:error, :nowhere}
+      room -> {:ok, room.id}
+    end
+  end
+
+  @doc """
+  Every live line, summarized the way the matchmaker scores them.
+
+  `silent_beats` comes straight off the room's own director — it is already
+  counting dead air to decide when to prod the bots, so liveness needs no new
+  bookkeeping.
+  """
+  def stumble_candidates do
+    PartyLine.Rooms.Registry
+    |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.map(fn {room_id, pid} ->
+      snapshot = Room.snapshot(pid)
+
+      %{
+        id: room_id,
+        topic: snapshot.topic,
+        bots: Enum.count(snapshot.roster, &(&1.kind == :bot)),
+        humans: Enum.count(snapshot.roster, &(&1.kind == :human)),
+        silent_beats: snapshot.silent_beats,
+        said_anything?: snapshot.transcript != []
+      }
+    end)
   end
 
   @doc "Live rooms with topic and headcount — feeds the Start menu room browser."

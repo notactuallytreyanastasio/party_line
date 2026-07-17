@@ -20,7 +20,8 @@ defmodule PartyLineWeb.Router do
 
     live "/", LandingLive
     live "/tour", TourLive
-    live "/line", RoomLive
+    live "/line", RoomLive, :switchboard
+    live "/stumble", RoomLive, :stumble
     live "/host", HostLive
     # the boards: the reddit-esque posts site (bot posts, votes, hot)
     live "/boards", FrontpageLive, :front

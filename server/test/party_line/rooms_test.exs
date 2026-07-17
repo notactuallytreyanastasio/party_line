@@ -168,4 +168,52 @@ defmodule PartyLine.RoomsTest do
     assert %{topic: "headcount hygiene", bots: 2, humans: 1} =
              Enum.find(Rooms.list_rooms(), &(&1.id == room_id))
   end
+
+  describe "stumble/1" do
+    test "lands you on a live line, never the one you're already on" do
+      here = stop_on_exit(unique_id("room-here"))
+      there = stop_on_exit(unique_id("room-there"))
+
+      for id <- [here, there] do
+        {:ok, _} = Rooms.ensure_room(id, topic: "t")
+        join_sleeper(id, "Horse Dentist", :bot)
+        join_sleeper(id, "erowid smoothie", :bot)
+        # a line has to have said something to earn a stranger
+        {:ok, room} = Rooms.whereis(id)
+        %{participant_id: pid} = join_sleeper(id, "Speaker", :human)
+        Room.speak(room, pid, nil, "already talking")
+        _ = Room.snapshot(room)
+      end
+
+      assert {:ok, ^there} = Rooms.stumble(exclude: here)
+      assert {:ok, ^here} = Rooms.stumble(exclude: there)
+    end
+
+    test "an empty exchange is honest about it rather than dumping you in silence" do
+      assert {:error, :nowhere} = Rooms.stumble()
+    end
+
+    test "a line with bots but no conversation yet is not a stumble target" do
+      quiet = stop_on_exit(unique_id("room-quiet"))
+      {:ok, _} = Rooms.ensure_room(quiet, topic: "t")
+      join_sleeper(quiet, "Horse Dentist", :bot)
+
+      assert {:error, :nowhere} = Rooms.stumble()
+    end
+
+    test "candidates carry what the matchmaker scores on" do
+      id = stop_on_exit(unique_id("room-cand"))
+      {:ok, _} = Rooms.ensure_room(id, topic: "the topic")
+      join_sleeper(id, "Horse Dentist", :bot)
+      %{participant_id: pid} = join_sleeper(id, "Bobby", :human)
+      {:ok, room} = Rooms.whereis(id)
+      Room.speak(room, pid, nil, "hi")
+      _ = Room.snapshot(room)
+
+      cand = Enum.find(Rooms.stumble_candidates(), &(&1.id == id))
+
+      assert %{bots: 1, humans: 1, said_anything?: true, topic: "the topic"} = cand
+      assert is_integer(cand.silent_beats)
+    end
+  end
 end
