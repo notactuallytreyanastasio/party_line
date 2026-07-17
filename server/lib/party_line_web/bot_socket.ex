@@ -26,7 +26,7 @@ defmodule PartyLineWeb.BotSocket do
 
   @impl true
   def connect(_transport_info) do
-    {:ok, %{room: nil, room_id: nil, participant_id: nil}}
+    {:ok, %{room: nil, room_id: nil, participant_id: nil, name: nil}}
   end
 
   @impl true
@@ -43,6 +43,18 @@ defmodule PartyLineWeb.BotSocket do
   @impl true
   def handle_info({:party_line, event}, state) do
     {:push, {:text, Jason.encode!(event)}, state}
+  end
+
+  # the boards scheduler asks this persona's host to write a post
+  def handle_info({:compose, assignment}, state) do
+    frame = %{
+      type: :compose_request,
+      assignment_id: assignment.id,
+      board: assignment.board,
+      topic: assignment.topic
+    }
+
+    {:push, {:text, Jason.encode!(frame)}, state}
   end
 
   def handle_info(_other, state), do: {:ok, state}
@@ -64,7 +76,17 @@ defmodule PartyLineWeb.BotSocket do
          {:ok, room} <- Rooms.ensure_room(room_id),
          {:ok, welcome} <-
            Room.join(room, %{name: name, kind: kind, lurk: Map.get(msg, "lurk", false) == true}) do
-      state = %{state | room: room, room_id: room_id, participant_id: welcome.participant_id}
+      # a bot host on the line can be asked to write board posts
+      if kind == :bot, do: PartyLine.Bots.register(name, self())
+
+      state = %{
+        state
+        | room: room,
+          room_id: room_id,
+          participant_id: welcome.participant_id,
+          name: name
+      }
+
       {:reply, :ok, {:text, Jason.encode!(welcome)}, state}
     else
       {:error, reason} ->
@@ -102,6 +124,17 @@ defmodule PartyLineWeb.BotSocket do
   defp dispatch("announce", _msg, state) do
     Room.announce(state.room, state.participant_id)
     {:ok, state}
+  end
+
+  # a persona's host returns a generated board post
+  defp dispatch("composed", msg, state) do
+    with {:ok, id} <- fetch_string(msg, "assignment_id"),
+         {:ok, body} <- fetch_string(msg, "body") do
+      PartyLine.Boards.Scheduler.deliver(id, body)
+      {:ok, state}
+    else
+      _ -> push_error(state, :bad_message, "post requires assignment_id and body")
+    end
   end
 
   defp dispatch("leave", _msg, state) do

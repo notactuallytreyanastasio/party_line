@@ -89,3 +89,6 @@ config :party_line, :lines, [
   {"room-supper-club", "street food worth fighting a seagull for"},
   {"room-observatory", "what's actually up there tonight, no equipment required"}
 ]
+
+# boards posting scheduler on in dev (off by default)
+config :party_line, :scheduler, enabled: true

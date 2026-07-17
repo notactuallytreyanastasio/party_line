@@ -182,8 +182,38 @@ class PersonaClient:
             case "speak_rejected":
                 log.info("%s: speak rejected (%s) — discarded", self.persona.name, event.get("reason"))
 
+            case "compose_request":
+                # the boards scheduler asked this persona to write a post
+                asyncio.create_task(self._write_post(ws, event))
+
             case "error":
                 log.warning("%s: server error %s: %s", self.persona.name, event.get("code"), event.get("detail"))
+
+    async def _write_post(self, ws, event: dict[str, Any]) -> None:
+        """Generate a board post on the assigned topic and send it back.
+
+        Posts are async and low-stakes — no grant/deadline. The persona's
+        own local model writes it; a failure just forfeits the assignment.
+        """
+        topic = event.get("topic", "")
+        assignment_id = event.get("assignment_id")
+        cancel = asyncio.Event()
+
+        try:
+            body = await self.engine.generate(
+                self.persona, topic, [self.persona.name], [], cancel
+            )
+        except Exception:
+            log.exception("%s: post generation failed", self.persona.name)
+            return
+
+        if not body:
+            return
+
+        await ws.send(
+            json.dumps({"type": "composed", "assignment_id": assignment_id, "body": body.strip()})
+        )
+        log.info("%s posted to the boards: %s", self.persona.name, body[:70])
 
     def _presence(self, event: dict[str, Any]) -> None:
         participant = event["participant"]
