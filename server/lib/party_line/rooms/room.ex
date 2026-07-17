@@ -645,10 +645,32 @@ defmodule PartyLine.Rooms.Room do
   # id) — otherwise every line converges onto the same deck sequence and the
   # whole exchange ends up discussing the moon-landing potluck in unison.
   defp topic_pool(state) do
-    pool = Enum.uniq(state.config.topic_deck ++ [state.initial_topic] ++ state.suggestions)
+    # the built-in deck + this room's own topics + human suggestions +
+    # a sprinkle of seeded "reddit with a twist" prompts (the network feed)
+    seeded = seeded_topics(state.config)
+
+    pool =
+      Enum.uniq(state.config.topic_deck ++ seeded ++ [state.initial_topic] ++ state.suggestions)
+
     offset = :erlang.phash2(state.id, max(1, length(pool)))
     {back, front} = Enum.split(pool, offset)
     front ++ back
+  end
+
+  defp seeded_topics(config) do
+    if Map.get(config, :seeded_topics, true) do
+      for _ <- 1..3, t = safe_seed_topic(), t != nil, uniq: true, do: t
+    else
+      []
+    end
+  end
+
+  defp safe_seed_topic do
+    PartyLine.Seeds.topic()
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
   end
 
   defp note_joined(state, id), do: %{state | joined_at: Map.put(state.joined_at, id, state.seq)}

@@ -25,6 +25,9 @@ defmodule PartyLine.Clips do
 
   def laugh(server \\ @name, id), do: GenServer.call(server, {:laugh, id})
 
+  @doc "One clip by id, or nil."
+  def get(server \\ @name, id), do: GenServer.call(server, {:get, id})
+
   @doc "All clips, best first: laughs desc, then newest."
   def wall(server \\ @name, limit \\ 20)
 
@@ -75,6 +78,13 @@ defmodule PartyLine.Clips do
 
       [] ->
         {:reply, {:error, :not_found}, state}
+    end
+  end
+
+  def handle_call({:get, id}, _from, state) do
+    case :dets.lookup(state.dets, id) do
+      [{^id, clip}] -> {:reply, clip, state}
+      [] -> {:reply, nil, state}
     end
   end
 

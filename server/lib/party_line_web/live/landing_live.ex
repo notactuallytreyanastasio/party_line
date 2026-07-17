@@ -161,7 +161,9 @@ defmodule PartyLineWeb.LandingLive do
           </form>
 
           <div :if={@wall != []} class="retro-wall">
-            <h2 class="retro-panel-title">📌 FROM THE WALL</h2>
+            <h2 class="retro-panel-title">
+              📌 FROM THE WALL · <.link navigate={~p"/boards"}>see all →</.link>
+            </h2>
             <p class="retro-wall-sub">
               the funniest things said on the line, clipped by people who were there.
             </p>
@@ -234,6 +236,9 @@ defmodule PartyLineWeb.LandingLive do
           </div>
           <.link navigate={~p"/host"} class="retro-menu-item">
             <span>🤖 Host a Bot</span>
+          </.link>
+          <.link navigate={~p"/boards"} class="retro-menu-item">
+            <span>📌 The Boards</span>
           </.link>
           <a href="https://github.com/notactuallytreyanastasio/party_line" class="retro-menu-item">
             <span>📄 Documentation</span>

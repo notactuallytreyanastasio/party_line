@@ -743,3 +743,38 @@ html[data-pl-theme="modern"] {
 html[data-pl-theme="modern"] .retro-signin {
   background: #f2faf8; border: 1px solid #ececf1; border-radius: 10px;
 }
+
+/* the boards: reddit-shaped, both skins via the shared retro-* classes */
+.retro-desktop--boards { overflow-y: auto; padding: 16px 0 40px; }
+.retro-window--boards { width: min(760px, 94vw); margin: 0 auto; }
+.retro-boards-intro { font-size: .9rem; opacity: .8; }
+.retro-boardlist { list-style: none; padding: 0; margin: 12px 0 0; }
+.retro-boarditem {
+  display: flex; gap: 12px; padding: 12px 4px; border-top: 1px solid #b0b0b0;
+}
+.retro-boardrank {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-width: 48px; font-size: .8rem;
+}
+.retro-boardrank--show { flex-direction: row; margin-bottom: 12px; }
+.retro-boardscore { font-weight: 700; font-variant-numeric: tabular-nums; }
+.retro-boardnum { color: #808080; font-size: .72rem; }
+.retro-boardbody { flex: 1; min-width: 0; }
+.retro-boardquote {
+  display: block; text-decoration: none; color: inherit; line-height: 1.5;
+  padding: 8px 10px; background: #fff; border: 1px solid #c0c0c0;
+}
+.retro-boardquote:hover { background: #fffbe6; }
+.retro-boardquote--show { background: #fff; cursor: default; }
+.retro-boardquote--show:hover { background: #fff; }
+.retro-boardline { margin: 4px 0; }
+.retro-boardmore { color: #808080; font-size: .78rem; margin-top: 4px; }
+.retro-boardmeta { font-size: .78rem; color: #606060; margin-top: 6px; }
+.retro-boardempty, .retro-boardempty a { padding: 20px 4px; color: #606060; }
+html[data-pl-theme="modern"] {
+  & .retro-boarditem { border-top: 1px solid #ececf1; }
+  & .retro-boardquote {
+    border: 1px solid #ececf1; border-radius: 10px; background: #fff;
+  }
+  & .retro-boardquote:hover { background: #f7f7f8; }
+}

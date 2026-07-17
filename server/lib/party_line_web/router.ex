@@ -20,6 +20,8 @@ defmodule PartyLineWeb.Router do
     live "/", LandingLive
     live "/line", RoomLive
     live "/host", HostLive
+    live "/boards", BoardsLive, :index
+    live "/boards/:id", BoardsLive, :show
 
     # atproto OAuth (sign in with your handle — no app passwords)
     post "/oauth/login", OAuthController, :login
