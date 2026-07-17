@@ -52,6 +52,16 @@ defmodule PartyLine.Memory.Client do
     end
   end
 
+  @doc """
+  Call any graph tool by name and hand back its raw result.
+
+  `add_node/2` and `link_nodes/2` are the shapes the ingest needs; this is for
+  callers who are relaying a tool the *bot* chose — see
+  `PartyLine.Memory.Broker`, which decides which of them are allowed.
+  """
+  @spec tool(config(), String.t(), map()) :: {:ok, term()} | {:error, term()}
+  def tool(%{graph: graph} = config, tool_name, args), do: tool(config, graph, tool_name, args)
+
   # ── internals ────────────────────────────────────────────────────────────
 
   defp tool(%{api_url: api_url, token: token}, graph, tool, args) do

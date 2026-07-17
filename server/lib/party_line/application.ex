@@ -21,6 +21,8 @@ defmodule PartyLine.Application do
         {PartyLine.ATProto.Sessions, []},
         {PartyLine.Seeds, []},
         {PartyLine.Boards, []},
+        # brokered memory calls run here so a slow daemon never wedges a bot socket
+        {Task.Supervisor, name: PartyLine.TaskSupervisor},
         {PartyLine.Bots, []},
         {PartyLine.Asks, []},
         {PartyLine.Boards.Scheduler, []},

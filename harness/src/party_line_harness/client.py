@@ -29,6 +29,7 @@ import websockets
 from .inference.engine import Engine
 from .memory.client import DeciduousMemory
 from .memory.episodic import episodic_notes
+from .memory.remember import parse_remembers
 from .pacing import typing_delay
 from .persona import Persona
 from .urge import compute_urge
@@ -67,6 +68,8 @@ class PersonaClient:
         self.roster: list[dict[str, Any]] = []
         self.transcript: list[dict[str, Any]] = []
         self.beats_since_message = 0
+        # call ids only need to be unique per socket, and the persona names it
+        self._memory_calls = 0
 
         # episodic memory: flush the transcript slice since this index
         self.messages_since_flush = 0
@@ -186,6 +189,14 @@ class PersonaClient:
             case "speak_rejected":
                 log.info("%s: speak rejected (%s) — discarded", self.persona.name, event.get("reason"))
 
+            case "memory_result":
+                if not event.get("ok"):
+                    # the room's memory is a nicety; the line keeps running
+                    log.debug(
+                        "%s: memory call %s refused: %s",
+                        self.persona.name, event.get("call_id"), event.get("error"),
+                    )
+
             case "compose_request":
                 # the boards scheduler asked this persona to write a post
                 asyncio.create_task(self._write_post(ws, event))
@@ -197,6 +208,32 @@ class PersonaClient:
 
             case "error":
                 log.warning("%s: server error %s: %s", self.persona.name, event.get("code"), event.get("detail"))
+
+    async def _remember(self, ws, note: str) -> None:
+        """Write a note into the room's shared memory, over the socket.
+
+        Fire-and-forget: the server answers with a memory_result we don't wait
+        for. A persona that stalled mid-conversation waiting on a daemon would
+        be trading the thing people came for (the conversation) against the
+        thing that only matters later (remembering it).
+        """
+        self._memory_calls += 1
+        await ws.send(
+            json.dumps(
+                {
+                    "type": "memory_call",
+                    "call_id": f"{self.persona.name}-{self._memory_calls}",
+                    "tool": "add_node",
+                    "args": {
+                        "node_type": "observation",
+                        "title": note[:120],
+                        "description": f"remembered by {self.persona.name}",
+                        "confidence": 60,
+                    },
+                }
+            )
+        )
+        log.info("%s remembered: %s", self.persona.name, note[:70])
 
     async def _answer(self, ws, event: dict[str, Any]) -> None:
         """Answer a routed question with this machine's own model.
@@ -336,8 +373,17 @@ class PersonaClient:
 
         if body is None or cancel.is_set():
             return
+
+        # Lift out whatever this persona decided to remember before anyone sees
+        # the message. Stripping first is not an optimization: a leaked
+        # <remember> tag in the chat is the failure everyone would notice.
+        body, notes = parse_remembers(body)
+        for note in notes:
+            await self._remember(ws, note)
+
         body = body.strip()
         if not body:
+            # a generation that was nothing but a tag: recorded, nothing to say
             return
 
         elapsed = asyncio.get_running_loop().time() - started

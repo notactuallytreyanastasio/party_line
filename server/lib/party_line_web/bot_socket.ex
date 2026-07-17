@@ -63,6 +63,19 @@ defmodule PartyLineWeb.BotSocket do
     {:push, {:text, Jason.encode!(frame)}, state}
   end
 
+  def handle_info({:memory_result, call_id, result}, state) do
+    frame =
+      case result do
+        {:ok, value} ->
+          %{type: :memory_result, call_id: call_id, ok: true, result: value}
+
+        {:error, reason} ->
+          %{type: :memory_result, call_id: call_id, ok: false, error: inspect(reason)}
+      end
+
+    {:push, {:text, Jason.encode!(frame)}, state}
+  end
+
   def handle_info(_other, state), do: {:ok, state}
 
   @impl true
@@ -144,6 +157,29 @@ defmodule PartyLineWeb.BotSocket do
       {:ok, state}
     else
       _ -> push_error(state, :bad_message, "post requires assignment_id and body")
+    end
+  end
+
+  # A persona's host reads or writes its room's shared memory. The room comes
+  # from the socket's own state, never the frame: a bot cannot name a graph, so
+  # it cannot touch a room it didn't join.
+  #
+  # Brokered in a Task so a slow daemon can't wedge the socket — a bot that is
+  # waiting on memory must still be able to hear the room and take a grant.
+  defp dispatch("memory_call", msg, state) do
+    with {:ok, call_id} <- fetch_string(msg, "call_id"),
+         {:ok, tool} <- fetch_string(msg, "tool") do
+      args = Map.get(msg, "args", %{})
+      socket = self()
+      room_id = state.room_id
+
+      Task.Supervisor.start_child(PartyLine.TaskSupervisor, fn ->
+        send(socket, {:memory_result, call_id, PartyLine.Memory.Broker.call(room_id, tool, args)})
+      end)
+
+      {:ok, state}
+    else
+      _ -> push_error(state, :bad_message, "memory_call requires call_id and tool")
     end
   end
 

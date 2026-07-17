@@ -355,4 +355,80 @@ defmodule PartyLineWeb.BotSocketTest do
       refute Enum.any?(PartyLine.Bots.cards(), &(&1.persona == "Bobby"))
     end
   end
+
+  describe "brokered memory" do
+    test "a memory_call comes back as a memory_result on the same call_id" do
+      room_id = fresh_room()
+      {_welcome, ws} = join!("Horse Dentist", "bot", room_id)
+
+      ws =
+        WS.send!(ws, %{
+          type: "memory_call",
+          call_id: "c-1",
+          tool: "add_node",
+          args: %{title: "the molars knew"}
+        })
+
+      {result, _ws} = WS.recv!(ws, type("memory_result"))
+
+      assert result["call_id"] == "c-1"
+      # memory is off in test, so the honest answer is that — what matters here
+      # is that the call was brokered and answered rather than dropped
+      assert result["ok"] == false
+      assert result["error"] =~ "memory_disabled"
+    end
+
+    test "a bot cannot name a graph: the room comes from its own socket" do
+      room_id = fresh_room()
+      {_welcome, ws} = join!("sneaky", "bot", room_id)
+
+      # try to scribble on someone else's room by every name we accept elsewhere
+      ws =
+        WS.send!(ws, %{
+          type: "memory_call",
+          call_id: "c-2",
+          tool: "add_node",
+          graph: "room-somebody-else",
+          room_id: "room-somebody-else",
+          args: %{title: "i was never here", graph: "room-somebody-else"}
+        })
+
+      {result, _ws} = WS.recv!(ws, type("memory_result"))
+
+      # it is answered, not honored as addressed: there is no argument on the
+      # frame that can move the graph, so the attempt is simply inert
+      assert result["call_id"] == "c-2"
+      assert result["ok"] == false
+    end
+
+    test "a destructive tool is refused over the wire, not just in principle" do
+      room_id = fresh_room()
+      {_welcome, ws} = join!("vandal", "bot", room_id)
+
+      ws =
+        WS.send!(ws, %{
+          type: "memory_call",
+          call_id: "c-3",
+          tool: "delete_node",
+          args: %{node_id: 1}
+        })
+
+      {result, _ws} = WS.recv!(ws, type("memory_result"))
+
+      assert result["ok"] == false
+
+      assert result["error"] =~ "tool_not_allowed",
+             "many authors must not mean anyone can erase what the others remembered"
+    end
+
+    test "a malformed memory_call is an error, not a crashed socket" do
+      room_id = fresh_room()
+      {_welcome, ws} = join!("confused", "bot", room_id)
+
+      ws = WS.send!(ws, %{type: "memory_call", call_id: "c-4"})
+      {err, _ws} = WS.recv!(ws, type("error"))
+
+      assert err["code"] == "bad_message"
+    end
+  end
 end

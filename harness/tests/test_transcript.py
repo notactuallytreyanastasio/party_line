@@ -102,6 +102,8 @@ def test_memories_section_appears_when_provided():
     memories = ["talked with Bobby (4 messages) about raccoons", "Bobby addressed me 2 times"]
     messages = tr.render_messages(NOVA, "t", ["Nova", "Bobby"], [msg("Bobby", "hi")], memories=memories)
     system = messages[0]["content"]
-    assert "Things you remember about the people here:" in system
+    # the room's memory is shared — every persona on the line writes into it,
+    # so another bot's note is this bot's context
+    assert "What this room remembers so far:" in system
     assert "- talked with Bobby (4 messages) about raccoons" in system
     assert "- Bobby addressed me 2 times" in system

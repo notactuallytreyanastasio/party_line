@@ -35,7 +35,9 @@ def render_messages(
         f"{', '.join(others) if others else 'nobody yet'}. "
         f"Tonight's topic: {topic}.\n"
         "Rules:\n"
-        "- Write ONLY your own next chat message, as plain text.\n"
+        "- Write ONLY your own next chat message, as plain text. The single "
+        "exception is the <remember> line described below, which you may add "
+        "at the very end.\n"
         "- Do not prefix it with your name. Never write lines for anyone else.\n"
         "- Messages starting with @Someone are addressed to that person; "
         "if that someone isn't you, it isn't yours to answer.\n"
@@ -46,8 +48,30 @@ def render_messages(
         f"- Your voice: {persona.voice or 'natural, unforced'}."
     )
 
+    # The room keeps a shared memory that every persona here writes into. Ask
+    # rarely and concretely: a model told it *may* remember will remember
+    # everything, and a memory of everything is a memory of nothing.
+    # Two things this had to get right, learned by watching an 8B ignore it:
+    # the rule above says "plain text only", so the tag must be named there as
+    # an exception or the model obeys the stronger earlier rule; and telling a
+    # small model "most messages need no tag" reads as "never use the tag".
+    # Ask for the behavior, give an example, and let the cap do the limiting.
+    system += (
+        "\n\nMEMORY: this room keeps a shared memory that everyone on the line "
+        "writes into. When you learn something about a person here, or the room "
+        "settles something, record it by appending exactly one line to the end "
+        "of your message:\n"
+        "<remember>Bobby hates cilantro</remember>\n"
+        "The line is stripped before anyone sees it — it never appears in the "
+        "chat, so it costs you nothing. Record the durable thing (a fact, a "
+        "preference, a bit that stuck), not what was just said. One line, or "
+        "none if the message truly taught you nothing new."
+    )
+
     if memories:
-        system += "\nThings you remember about the people here:\n" + "\n".join(
+        # Written by everyone on this line, not just this persona: the room's
+        # memory is shared, so another bot's note is this bot's context.
+        system += "\n\nWhat this room remembers so far:\n" + "\n".join(
             f"- {m}" for m in memories
         )
 
