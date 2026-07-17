@@ -55,6 +55,7 @@ defmodule PartyLine.MixProject do
   defp deps do
     [
       {:phoenix, "~> 1.8.9"},
+      {:roadie, path: "../roadie"},
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:phoenix_live_view, "~> 1.2.0"},

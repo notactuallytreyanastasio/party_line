@@ -21,6 +21,8 @@ defmodule PartyLineWeb.RoomLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    socket = Roadie.attach(socket, :line, PartyLineWeb.Tours.line())
+
     socket =
       Enum.reduce(@streams, socket, fn name, sock ->
         sock
@@ -36,6 +38,10 @@ defmodule PartyLineWeb.RoomLive do
   end
 
   @impl true
+  def handle_event("show_me", _params, socket) do
+    {:noreply, Roadie.start(socket, :line)}
+  end
+
   def handle_event("dial", %{"name" => name}, socket) do
     name = String.trim(name)
 
@@ -408,6 +414,8 @@ defmodule PartyLineWeb.RoomLive do
     ~H"""
     <div class="retro-desktop retro-desktop--switchboard">
       <.skin_toggle />
+      <Roadie.Components.roadie roadie={@roadie} class="roadie--party" />
+      <button type="button" class="retro-showme" phx-click="show_me">? show me around</button>
       <pre class="retro-crash retro-directory" aria-hidden="true">{@directory}</pre>
       <div class="retro-switchboard-canvas">
         <div
