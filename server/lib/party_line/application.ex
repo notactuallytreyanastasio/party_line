@@ -22,6 +22,7 @@ defmodule PartyLine.Application do
         {PartyLine.Seeds, []},
         {PartyLine.Boards, []},
         {PartyLine.Bots, []},
+        {PartyLine.Asks, []},
         {PartyLine.Boards.Scheduler, []},
         # Soft-state catalog of tailnet-exposed LLM hosts.
         PartyLine.Hosts

@@ -56,6 +56,16 @@ defmodule PartyLine.Bots do
   def request_compose(server \\ @name, persona, assignment),
     do: GenServer.call(server, {:request_compose, persona, assignment})
 
+  @doc """
+  Ask a persona's host to answer a chat question. `ask` is `%{id, prompt}`,
+  delivered as an `ask_request` frame over its socket.
+
+  Returns :ok whether or not anyone is home — the answer, if it comes, arrives
+  later and out of band. `PartyLine.Asks` is what remembers that it's owed one.
+  """
+  def request_answer(server \\ @name, persona, ask),
+    do: GenServer.call(server, {:request_answer, persona, ask})
+
   # ── server ────────────────────────────────────────────────────────────────
 
   @impl true
@@ -90,6 +100,15 @@ defmodule PartyLine.Bots do
   def handle_call({:request_compose, persona, assignment}, _from, state) do
     case Enum.find(state.pids, fn {_pid, name} -> name == persona end) do
       {pid, _} -> send(pid, {:compose, assignment})
+      nil -> :noop
+    end
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:request_answer, persona, ask}, _from, state) do
+    case Enum.find(state.pids, fn {_pid, name} -> name == persona end) do
+      {pid, _} -> send(pid, {:ask, ask})
       nil -> :noop
     end
 

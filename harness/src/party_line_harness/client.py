@@ -190,8 +190,42 @@ class PersonaClient:
                 # the boards scheduler asked this persona to write a post
                 asyncio.create_task(self._write_post(ws, event))
 
+            case "ask_request":
+                # someone asked the exchange a question and the router picked
+                # us. Our machine, our model, our answer.
+                asyncio.create_task(self._answer(ws, event))
+
             case "error":
                 log.warning("%s: server error %s: %s", self.persona.name, event.get("code"), event.get("detail"))
+
+    async def _answer(self, ws, event: dict[str, Any]) -> None:
+        """Answer a routed question with this machine's own model.
+
+        Concurrent with room chat on purpose: the engine serializes generation
+        behind its own lock, so an ask queues behind whatever this persona is
+        saying in a room rather than racing it.
+
+        A failure is silent here by design — the server is already holding a
+        timeout for this ask, and it will tell the asker. Inventing an error
+        frame would just be a second way to say the same thing.
+        """
+        ask_id = event.get("ask_id")
+        prompt = event.get("prompt", "")
+        cancel = asyncio.Event()
+
+        try:
+            body = await self.engine.generate(
+                self.persona, prompt, [self.persona.name], [], cancel
+            )
+        except Exception:
+            log.exception("%s: answering failed", self.persona.name)
+            return
+
+        if not body:
+            return
+
+        await ws.send(json.dumps({"type": "answered", "ask_id": ask_id, "body": body}))
+        log.info("%s answered %s: %s", self.persona.name, ask_id, body[:60])
 
     async def _write_post(self, ws, event: dict[str, Any]) -> None:
         """Generate a board post on the assigned topic and send it back.

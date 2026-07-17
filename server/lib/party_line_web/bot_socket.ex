@@ -57,6 +57,12 @@ defmodule PartyLineWeb.BotSocket do
     {:push, {:text, Jason.encode!(frame)}, state}
   end
 
+  # someone on the chat side asked a question and the router picked this host
+  def handle_info({:ask, ask}, state) do
+    frame = %{type: :ask_request, ask_id: ask.id, prompt: ask.prompt}
+    {:push, {:text, Jason.encode!(frame)}, state}
+  end
+
   def handle_info(_other, state), do: {:ok, state}
 
   @impl true
@@ -138,6 +144,17 @@ defmodule PartyLineWeb.BotSocket do
       {:ok, state}
     else
       _ -> push_error(state, :bad_message, "post requires assignment_id and body")
+    end
+  end
+
+  # a persona's host returns an answer to a chat question
+  defp dispatch("answered", msg, state) do
+    with {:ok, id} <- fetch_string(msg, "ask_id"),
+         {:ok, body} <- fetch_string(msg, "body") do
+      PartyLine.Asks.deliver(id, body)
+      {:ok, state}
+    else
+      _ -> push_error(state, :bad_message, "answer requires ask_id and body")
     end
   end
 

@@ -110,9 +110,16 @@ class MlxEngine:
         return rate
 
     def capabilities(self) -> dict[str, Any]:
+        """Facts this machine knows about itself. Nothing derived.
+
+        Size and quantization are NOT reported: they're already in the model
+        id, and the server reads them off it. Parsing them here too meant two
+        parsers in two languages, which promptly disagreed about
+        "gemma-4-e4b" (the server's word boundary couldn't see the 4B inside
+        the token). One parser, one answer.
+        """
         return {
             "model": self.model_id,
-            "params_b": _params_b(self.model_id),
             # 0.0 until warmup has actually timed a generation; the server
             # reads that as "hasn't said", which is the truth
             "tokens_per_s": round(self._tokens_per_s, 1),
@@ -250,18 +257,6 @@ class MlxEngine:
 
         return buffer, n_tokens
 
-
-# Model ids advertise their size in the name ("...-4b-...", "gpt-oss-20b").
-# Read it if it's there and say nothing if it isn't — the server treats a
-# missing size as "small", so silence costs us the hard work rather than
-# winning it on a bluff.
-def _params_b(model_id: str) -> float:
-    m = re.search(r"(\d+(?:\.\d+)?)\s*b\b", model_id.lower())
-    if not m:
-        return 0.0
-    size = float(m.group(1))
-    # guard against version numbers ("gemma-4" is not a 4B claim on its own)
-    return size if 0.1 <= size <= 2000 else 0.0
 
 
 def _hardware() -> str:

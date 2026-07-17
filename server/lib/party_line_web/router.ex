@@ -20,6 +20,7 @@ defmodule PartyLineWeb.Router do
 
     live "/", LandingLive
     live "/tour", TourLive
+    live "/ask", AskLive
     live "/line", RoomLive, :switchboard
     live "/stumble", RoomLive, :stumble
     live "/host", HostLive
