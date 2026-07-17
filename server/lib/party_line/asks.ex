@@ -88,7 +88,21 @@ defmodule PartyLine.Asks do
   def handle_call({:ask, asker, prompt, opts}, _from, state) do
     cards = Bots.cards(state.bots)
 
-    case Router.route(cards, prompt, cursor: state.cursor, target: opts[:target]) do
+    # Routing reads an arbitrary user prompt (Target.parse over chat text). This
+    # is the one shared correlator for every ask, so a crash here would orphan
+    # every other user's pending ask along with this one — a remote DoS of the
+    # whole exchange from a single message. A failure to route degrades this ask
+    # to :nobody_online; it never takes the process down.
+    routed =
+      try do
+        Router.route(cards, prompt, cursor: state.cursor, target: opts[:target])
+      rescue
+        e ->
+          Logger.error("ask routing crashed on #{inspect(prompt)}: #{Exception.message(e)}")
+          {:error, :nobody_online}
+      end
+
+    case routed do
       {:error, :nobody_online} ->
         {:reply, {:error, :nobody_online}, state}
 

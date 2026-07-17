@@ -184,27 +184,36 @@ defmodule PartyLine.Memory.ClientTest do
     end
   end
 
-  test "a 5xx is retried up to max_retries before giving up" do
+  test "an idempotent PUT (ensure_graph) is retried up to max_retries on a 5xx" do
     config = counting(503)
 
-    assert {:error, {:http_status, 503, _}} = Client.add_node(config, %{title: "x"})
+    assert {:error, {:http_status, 503, _}} = Client.ensure_graph(config)
     # original attempt + 2 retries
     assert hits() == 3
   end
 
-  test "a 404 is NOT retried — it must surface so Ingest can self-heal" do
+  test "a non-idempotent POST (add_node) is NEVER retried — a duplicate node is worse than a drop" do
+    config = counting(503)
+
+    assert {:error, {:http_status, 503, _}} = Client.add_node(config, %{title: "x"})
+
+    assert hits() == 1,
+           "retrying an append after an ambiguous failure would write the same node twice"
+  end
+
+  test "a 404 is NOT retried even on an idempotent PUT — it must surface so Ingest can self-heal" do
     config = counting(404)
 
-    assert {:error, {:http_status, 404, _}} = Client.add_node(config, %{title: "x"})
+    assert {:error, {:http_status, 404, _}} = Client.ensure_graph(config)
 
     assert hits() == 1,
            "retrying a 404 would swallow the 'graph vanished' signal Ingest depends on"
   end
 
-  test "max_retries: 0 makes a transient failure single-shot" do
+  test "max_retries: 0 makes even an idempotent transient failure single-shot" do
     config = %{counting(500) | max_retries: 0}
 
-    assert {:error, _} = Client.add_node(config, %{title: "x"})
+    assert {:error, _} = Client.ensure_graph(config)
     assert hits() == 1
   end
 end

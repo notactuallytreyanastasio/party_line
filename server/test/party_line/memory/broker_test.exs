@@ -42,8 +42,8 @@ defmodule PartyLine.Memory.BrokerTest do
 
       # the graph is created if it isn't there yet — a bot's first write may
       # beat the server's first ingest
-      assert_receive {:daemon, "PUT", "/api/v1/graphs/room-observatory", _}
-      assert_receive {:daemon, "POST", "/api/v1/graphs/room-observatory/tools/add_node", body}
+      assert_receive {:daemon, "PUT", "/api/v1/graphs/plr-room-observatory", _}
+      assert_receive {:daemon, "POST", "/api/v1/graphs/plr-room-observatory/tools/add_node", body}
       assert body =~ "the moon again"
     end
 

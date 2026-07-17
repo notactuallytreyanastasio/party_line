@@ -120,4 +120,19 @@ defmodule PartyLine.Agents.TargetTest do
       assert Target.describe(%{}) == "anything"
     end
   end
+
+  describe "malformed numbers never crash the correlator" do
+    test "a 300-digit number is not a constraint and does not raise" do
+      # This runs inside the singleton Asks GenServer's handle_call. String.to_float
+      # raised ArgumentError on an out-of-range literal, which would take down every
+      # concurrent pending ask — a remote DoS from one chat message.
+      huge = String.duplicate("9", 320)
+      assert Target.parse("is there something thats #{huge}b or more?") == %{}
+      assert Target.parse("at least #{huge} tok/s") == %{}
+    end
+
+    test "a plausible but large number is dropped rather than raising" do
+      assert Target.parse("anything 999999999999b or more?") == %{}
+    end
+  end
 end

@@ -131,7 +131,9 @@ defmodule PartyLine.Memory.IngestTest do
 
     # the room's own graph, ensured exactly once — a room is a conversation
     # with its own thread of what happened, so it gets its own graph
-    assert length(calls_to(agent, "/graphs/room-1")) == 1
+    assert length(calls_to(agent, "/graphs/plr-room-1")) == 1
+    # never the bare room id (that could collide with a human's graph) nor the root
+    assert calls_to(agent, "/graphs/room-1") == []
     assert calls_to(agent, "/graphs/party-line-root") == []
 
     adds = calls_to(agent, "/tools/add_node")
@@ -368,14 +370,14 @@ defmodule PartyLine.Memory.IngestTest do
     Ingest.record_message(ingest, "room-beta", msg(1, "Bo", "in beta"))
     sync(ingest)
 
-    assert length(calls_to(agent, "/graphs/room-alpha")) == 1
-    assert length(calls_to(agent, "/graphs/room-beta")) == 1
+    assert length(calls_to(agent, "/graphs/plr-room-alpha")) == 1
+    assert length(calls_to(agent, "/graphs/plr-room-beta")) == 1
 
     adds = calls_to(agent, "/tools/add_node")
     assert length(adds) == 2
     # every write went to its own room's graph
-    assert Enum.any?(adds, &String.contains?(&1.path, "/graphs/room-alpha/"))
-    assert Enum.any?(adds, &String.contains?(&1.path, "/graphs/room-beta/"))
+    assert Enum.any?(adds, &String.contains?(&1.path, "/graphs/plr-room-alpha/"))
+    assert Enum.any?(adds, &String.contains?(&1.path, "/graphs/plr-room-beta/"))
   end
 
   test "a vanished graph is re-created rather than dropping every event forever" do
@@ -384,7 +386,7 @@ defmodule PartyLine.Memory.IngestTest do
 
     Ingest.record_message(ingest, "room-1", msg(1, "Ada", "before"))
     sync(ingest)
-    assert length(calls_to(agent, "/graphs/room-1")) == 1
+    assert length(calls_to(agent, "/graphs/plr-room-1")) == 1
 
     # the daemon loses the graph out from under us (data wiped, cache/disk
     # disagreeing — exactly what happened in dev)
@@ -396,7 +398,7 @@ defmodule PartyLine.Memory.IngestTest do
     Ingest.record_message(ingest, "room-1", msg(3, "Cy", "after"))
     sync(ingest)
 
-    assert length(calls_to(agent, "/graphs/room-1")) == 2,
+    assert length(calls_to(agent, "/graphs/plr-room-1")) == 2,
            "a 404 must un-latch `ensured`, or memory dies silently for the life of the server"
 
     assert Enum.any?(calls_to(agent, "/tools/add_node"), &(&1.body["title"] == "Cy: after"))

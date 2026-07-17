@@ -64,13 +64,22 @@ defmodule PartyLine.Memory.Ingest do
     env = Application.get_env(:party_line, :memory, [])
     enabled = Keyword.get(opts, :enabled, Keyword.get(env, :enabled, false))
 
+    # Ingestion is a single serial GenServer, and it blocks on each HTTP call —
+    # so any retry/timeout latency here stalls EVERY room's memory, not just the
+    # one that failed. That's the wrong trade for a best-effort firehose whose
+    # backup is the JSONL transcript: fail fast and drop, rather than freeze the
+    # queue chasing one event. So the ingest path takes no retries and a short
+    # timeout. Explicit, low-volume writes (a bot's brokered "remember") keep
+    # the resilient defaults — they run in a Task and block nothing.
     config =
-      Keyword.get(opts, :config) ||
-        %{
-          api_url: Keyword.get(env, :api_url),
-          token: Keyword.get(env, :token),
-          graph: Keyword.get(env, :root_graph, "party-line-root")
-        }
+      (Keyword.get(opts, :config) ||
+         %{
+           api_url: Keyword.get(env, :api_url),
+           token: Keyword.get(env, :token),
+           graph: Keyword.get(env, :root_graph, "party-line-root")
+         })
+      |> Map.put_new(:max_retries, 0)
+      |> Map.put_new(:receive_timeout, 5_000)
 
     {:ok,
      %{
@@ -195,7 +204,10 @@ defmodule PartyLine.Memory.Ingest do
 
   # The room id is the graph id. Rooms are already validated as
   # [a-z0-9][a-z0-9_-]* on the way in, which is exactly deciduous's rule.
-  defp graph_for(state, room_id), do: %{state.config | graph: room_id}
+  # PartyLine.Memory.room_graph namespaces the id so a room can never address
+  # a human's project graph on the shared daemon — see its moduledoc.
+  defp graph_for(state, room_id),
+    do: %{state.config | graph: PartyLine.Memory.room_graph(room_id)}
 
   defp ensure(state, room_id) do
     if MapSet.member?(state.ensured, room_id) do

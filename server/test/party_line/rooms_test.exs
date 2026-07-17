@@ -216,4 +216,24 @@ defmodule PartyLine.RoomsTest do
       assert is_integer(cand.silent_beats)
     end
   end
+
+  describe "ensure_room/2 validation (the memory-graph boundary)" do
+    test "rejects a malformed id instead of creating a room under it" do
+      # A bot socket takes room_id straight off its join frame, and that id
+      # becomes the room's deciduous graph id. An unvalidated id here is a
+      # federated stranger naming an arbitrary graph on the shared daemon.
+      assert {:error, :invalid_room} = Rooms.ensure_room("../../etc/passwd")
+      assert {:error, :invalid_room} = Rooms.ensure_room("Party-Line-Root")
+      assert {:error, :invalid_room} = Rooms.ensure_room("has spaces")
+      assert {:error, :invalid_room} = Rooms.ensure_room(String.duplicate("a", 65))
+      assert {:error, :invalid_room} = Rooms.ensure_room("-leading-dash")
+      assert {:error, :invalid_room} = Rooms.ensure_room(:not_a_string)
+    end
+
+    test "accepts a well-formed id" do
+      id = stop_on_exit(unique_id("room-ok"))
+      assert {:ok, pid} = Rooms.ensure_room(id, topic: "t")
+      assert is_pid(pid)
+    end
+  end
 end

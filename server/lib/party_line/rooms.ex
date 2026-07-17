@@ -68,7 +68,24 @@ defmodule PartyLine.Rooms do
     byte_size(id) in 1..64 and String.match?(id, ~r/^[a-z0-9][a-z0-9_-]*$/)
   end
 
-  def ensure_room(room_id, opts \\ []) do
+  def ensure_room(room_id, opts \\ [])
+
+  # The validation guards every entry point, not just dial/1. A bot socket
+  # takes room_id straight off the join frame (party_line_web/bot_socket.ex),
+  # and that id becomes the room's memory graph id on the shared deciduous
+  # daemon — so an unvalidated id here is a federated stranger naming an
+  # arbitrary graph. Reject a malformed id rather than create a room under it.
+  def ensure_room(room_id, _opts) when not is_binary(room_id), do: {:error, :invalid_room}
+
+  def ensure_room(room_id, opts) do
+    if valid_room_id?(room_id) do
+      do_ensure_room(room_id, opts)
+    else
+      {:error, :invalid_room}
+    end
+  end
+
+  defp do_ensure_room(room_id, opts) do
     case Registry.lookup(PartyLine.Rooms.Registry, room_id) do
       [{pid, _}] ->
         {:ok, pid}

@@ -126,10 +126,17 @@ defmodule PartyLine.Memory.Client do
     e -> {:error, {:exception, Exception.message(e)}}
   end
 
-  # Req calls this per attempt. Retry transient statuses and any transport
-  # exception (connection refused, TLS handshake, receive timeout); everything
-  # else — crucially a 404 — is handed back to the caller on the first try, so
-  # Ingest's "graph vanished, re-create it" self-heal still fires.
+  # Req calls this per attempt. Only IDEMPOTENT requests retry: PUT (ensure_graph)
+  # and reads. A tool call is a POST that appends a node, and a retry after an
+  # ambiguous failure — a receive timeout where the server may already have
+  # committed, or a gateway 5xx — would append the SAME node twice, with no way
+  # to tell. A dropped write is recoverable (the JSONL transcript is the flight
+  # recorder, and Ingest re-ensures on the next event), a duplicate node isn't.
+  # So a POST never retries; a transient blip drops it and we move on.
+  #
+  # A 404 is excluded from retry regardless, so Ingest's "graph vanished,
+  # re-create it" self-heal still fires on the first try.
+  defp retry?(%{method: method}, _) when method not in [:get, :head, :put], do: false
   defp retry?(_request, %Req.Response{status: status}), do: status in @retry_statuses
   defp retry?(_request, exception) when is_exception(exception), do: true
   defp retry?(_request, _other), do: false

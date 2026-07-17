@@ -68,16 +68,14 @@ defmodule PartyLine.Agents.Target do
   def describe(target) when map_size(target) == 0, do: "anything"
 
   def describe(target) do
-    target
-    |> Enum.map(fn
-      {:persona, name} -> name
-      {:model, model} -> "a #{model} model"
-      {:min_params_b, b} -> "#{trim(b)}B or bigger"
-      {:min_quant_bits, q} -> "#{quant_word(q)} or better"
-      {:min_tokens_per_s, t} -> "#{trim(t)} tok/s or faster"
-    end)
-    |> Enum.join(", ")
+    Enum.map_join(target, ", ", &describe_one/1)
   end
+
+  defp describe_one({:persona, name}), do: name
+  defp describe_one({:model, model}), do: "a #{model} model"
+  defp describe_one({:min_params_b, b}), do: "#{trim(b)}B or bigger"
+  defp describe_one({:min_quant_bits, q}), do: "#{quant_word(q)} or better"
+  defp describe_one({:min_tokens_per_s, t}), do: "#{trim(t)} tok/s or faster"
 
   # ── reading the ask ──────────────────────────────────────────────────────
 
@@ -149,10 +147,13 @@ defmodule PartyLine.Agents.Target do
     end
   end
 
-  # "a gpt-oss model", "use llama", "on gemma"
+  # "use gpt-oss", "on gemma", "with llama". Deliberately NOT "a"/"an": a bare
+  # article turns any sentence that merely mentions a family ("a llama walked
+  # into a bar") into a hard routing constraint. The selection verbs are the
+  # signal; the article is noise.
   defp model_name(down) do
     case Regex.run(
-           ~r/\b(?:use|using|on|with|a|an)\s+(gpt-oss|gemma|llama|qwen|mistral|phi)\b/,
+           ~r/\b(?:use|using|on|with)\s+(gpt-oss|gemma|llama|qwen|mistral|phi)\b/,
            down
          ) do
       [_, name] -> name
@@ -160,13 +161,29 @@ defmodule PartyLine.Agents.Target do
     end
   end
 
-  # Only names we actually know: matching arbitrary capitalized words would
-  # turn every mention of a proper noun into a routing constraint.
+  # Only names we actually know, and only as whole words: a raw substring test
+  # let a short persona ("Nova") hijack routing from any word that contains it
+  # ("supernova", "innovate"). Match on token boundaries instead.
   defp persona(down, known) do
-    Enum.find(known, fn name -> String.contains?(down, String.downcase(name)) end)
+    tokens = down |> String.split(~r/[^a-z0-9]+/, trim: true) |> MapSet.new()
+
+    Enum.find(known, fn name ->
+      parts = name |> String.downcase() |> String.split(~r/[^a-z0-9]+/, trim: true)
+      parts != [] and Enum.all?(parts, &MapSet.member?(tokens, &1))
+    end)
   end
 
-  defp num([_, n]), do: String.to_float(if String.contains?(n, "."), do: n, else: n <> ".0")
+  # Float.parse, never String.to_float: the digits come from a stranger's chat
+  # message, and String.to_float RAISES on an out-of-range literal (a ~310-digit
+  # number). This runs inside the singleton Asks correlator's handle_call, so a
+  # raise there would take down every concurrent pending ask. An unparseable or
+  # absurd number is simply not a constraint.
+  defp num([_, n]) do
+    case Float.parse(n) do
+      {f, _} when f >= 0.0 and f <= 1.0e9 -> f
+      _ -> nil
+    end
+  end
 
   defp put(target, _key, nil), do: target
   defp put(target, key, value), do: Map.put(target, key, value)

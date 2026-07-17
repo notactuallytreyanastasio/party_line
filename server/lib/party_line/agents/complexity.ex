@@ -108,9 +108,17 @@ defmodule PartyLine.Agents.Complexity do
   defp flag(signals, name, true), do: [name | signals]
   defp flag(signals, _name, false), do: signals
 
+  # A code fence is unambiguous. The keyword branch needs code *shape*, not a
+  # bare English word: "what's your class schedule" or "import your contacts"
+  # are not pasted code, but "\bclass\b"/"\bimport\b" flagged them straight to
+  # :hard. Require the keyword to sit next to code punctuation — a def/function
+  # with parens or an identifier, a class with a name, a SELECT…FROM.
   defp code?(text) do
     String.contains?(text, "```") or
-      Regex.match?(~r/\b(def|function|class|SELECT|import)\b/, text)
+      Regex.match?(
+        ~r/\b(?:def |function\s+\w|function\s*\(|class\s+\w|import\s+[\w{]|SELECT\b.+\bFROM)\b/i,
+        text
+      )
   end
 
   defp any_word?(down, words) do

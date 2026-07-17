@@ -69,7 +69,7 @@ defmodule PartyLine.Memory.Broker do
         {:error, :memory_disabled}
 
       true ->
-        run(%{config | graph: room_id}, tool, args)
+        run(%{config | graph: PartyLine.Memory.room_graph(room_id)}, tool, args)
     end
   end
 
