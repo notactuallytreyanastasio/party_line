@@ -9,6 +9,7 @@ defmodule PartyLineWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     plug PartyLineWeb.Plugs.Voter
+    plug PartyLineWeb.Plugs.CurrentIdentity
   end
 
   pipeline :api do
@@ -28,6 +29,7 @@ defmodule PartyLineWeb.Router do
     live "/", LandingLive
     live "/tour", TourLive
     live "/ask", AskLive
+    live "/keys", KeysLive
     live "/line", RoomLive, :switchboard
     live "/stumble", RoomLive, :stumble
     live "/host", HostLive

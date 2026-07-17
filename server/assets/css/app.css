@@ -1348,3 +1348,41 @@ html[data-pl-theme="modern"] {
   & .retro-comment-meta { color: #10a37f; }
   & .retro-comments, & .retro-comments-head { border-color: #ececf1; }
 }
+
+/* ── API keys page ─────────────────────────────────────────────────────── */
+.retro-keytoken {
+  background: #000;
+  color: #33ff33;
+  padding: 10px 12px;
+  border: 1px solid #555;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  margin: 8px 0;
+}
+.retro-keytable {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+}
+.retro-keytable th,
+.retro-keytable td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #999;
+}
+.retro-keytable tr.is-revoked {
+  opacity: 0.5;
+}
+.retro-keyrevoked {
+  font-style: italic;
+  color: #a00;
+}
+.retro-keyusage {
+  margin-top: 16px;
+  border-top: 1px dashed #999;
+  padding-top: 12px;
+}
