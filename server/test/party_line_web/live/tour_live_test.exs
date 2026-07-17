@@ -18,7 +18,7 @@ defmodule PartyLineWeb.TourLiveTest do
   test "every beat renders, in order", %{conn: conn} do
     {:ok, _view, html} = live(conn, "/tour")
 
-    for n <- 1..6, do: assert(html =~ "tour-scene--#{n}")
+    for n <- 1..6, do: assert(html =~ "reel-scene--#{n}")
     assert html =~ "You didn&#39;t start this conversation."
     assert html =~ "Someone is talking right now."
   end
@@ -29,7 +29,7 @@ defmodule PartyLineWeb.TourLiveTest do
     # the body starts empty and the line rides in data-text — if this inverts,
     # the page would render finished text and the typing would never be seen
     assert html =~ ~s(data-text="the molars knew. the molars always knew.")
-    assert html =~ ~s(<span class="tour-msg-body" data-text=)
+    assert html =~ ~s(<span class="reel-msg-body" data-text=)
   end
 
   test "the exits point at the real rooms", %{conn: conn} do

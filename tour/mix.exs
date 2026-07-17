@@ -1,4 +1,4 @@
-defmodule Roadie.MixProject do
+defmodule Tour.MixProject do
   use Mix.Project
 
   @version "0.1.0"
@@ -6,12 +6,12 @@ defmodule Roadie.MixProject do
 
   def project do
     [
-      app: :roadie,
+      app: :tour,
       version: @version,
       elixir: "~> 1.15",
-      # Roadie ships its hook colocated with the component. The extraction is a
+      # Tour ships its hook colocated with the component. The extraction is a
       # compile-time macro, but the index.js manifest that makes
-      # `phoenix-colocated/roadie` resolvable is written by this compiler — a
+      # `phoenix-colocated/tour` resolvable is written by this compiler — a
       # library carrying colocated hooks has to run it, or consumers get an
       # unresolved import instead of a tour.
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
@@ -22,7 +22,7 @@ defmodule Roadie.MixProject do
         "Guided product tours for Phoenix LiveView: a spotlight that rides on top of your real UI.",
       package: package(),
       docs: docs(),
-      name: "Roadie",
+      name: "Tour",
       source_url: @source_url
     ]
   end

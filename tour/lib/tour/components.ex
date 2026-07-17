@@ -1,34 +1,34 @@
-defmodule Roadie.Components do
+defmodule Tour.Components do
   @moduledoc """
   The one component you render. Put it anywhere in your template — it's
   fixed-position, so it doesn't matter where.
 
-      <Roadie.Components.roadie roadie={@roadie} />
+      <Tour.Components.tour tour={@tour} />
 
   It renders nothing at all unless a tour is running.
   """
 
   use Phoenix.Component
 
-  alias Roadie.{Step, Tour}
+  alias Tour.{Step, Walk}
 
   @doc """
   Renders the running tour's spotlight and card.
 
   Attributes:
 
-    * `:roadie` — the state Roadie keeps on the socket (`@roadie`)
+    * `:tour` — the state Tour keeps on the socket (`@tour`)
     * `:labels` — override the button text, e.g.
       `%{next: "Next", back: "Back", done: "Got it", skip: "Skip"}`
     * `:class` — extra classes on the root, for theming
   """
-  attr :roadie, :map, default: nil
+  attr :tour, :map, default: nil
   attr :class, :string, default: nil
   attr :labels, :map, default: %{}
 
-  def roadie(assigns) do
-    tour = Roadie.running(assigns.roadie)
-    step = tour && Tour.current(tour)
+  def tour(assigns) do
+    tour = Tour.running(assigns.tour)
+    step = tour && Walk.current(tour)
 
     assigns =
       assigns
@@ -38,51 +38,51 @@ defmodule Roadie.Components do
     ~H"""
     <div
       :if={@step}
-      id="roadie"
-      class={["roadie", @class]}
-      phx-hook=".Roadie"
+      id="tour"
+      class={["tour", @class]}
+      phx-hook=".Tour"
       data-target={@step.target}
       data-placement={@step.placement}
       data-pad={@step.pad}
       data-radius={@step.radius}
       data-clicks={to_string(@step.clicks)}
     >
-      <div class="roadie-veil" data-veil phx-click="roadie:stop"></div>
-      <div class="roadie-hole" data-hole aria-hidden="true"></div>
+      <div class="tour-veil" data-veil phx-click="tour:stop"></div>
+      <div class="tour-hole" data-hole aria-hidden="true"></div>
 
       <div
-        class="roadie-card"
+        class="tour-card"
         data-card
         role="dialog"
         aria-modal="true"
-        aria-labelledby="roadie-title"
+        aria-labelledby="tour-title"
         tabindex="-1"
       >
-        <p class="roadie-count">{Tour.position(@tour)} of {Tour.size(@tour)}</p>
-        <h2 class="roadie-title" id="roadie-title">{@step.title}</h2>
-        <p :if={@step.body} class="roadie-body">{@step.body}</p>
+        <p class="tour-count">{Walk.position(@tour)} of {Walk.size(@tour)}</p>
+        <h2 class="tour-title" id="tour-title">{@step.title}</h2>
+        <p :if={@step.body} class="tour-body">{@step.body}</p>
 
-        <div class="roadie-actions">
-          <button type="button" class="roadie-btn roadie-btn--ghost" phx-click="roadie:stop">
+        <div class="tour-actions">
+          <button type="button" class="tour-btn tour-btn--ghost" phx-click="tour:stop">
             {@labels.skip}
           </button>
-          <span class="roadie-gap"></span>
+          <span class="tour-gap"></span>
           <button
-            :if={not Tour.first?(@tour)}
+            :if={not Walk.first?(@tour)}
             type="button"
-            class="roadie-btn"
-            phx-click="roadie:back"
+            class="tour-btn"
+            phx-click="tour:back"
           >
             {@labels.back}
           </button>
-          <button type="button" class="roadie-btn roadie-btn--go" phx-click="roadie:next">
-            {if Tour.last?(@tour), do: @labels.done, else: @labels.next}
+          <button type="button" class="tour-btn tour-btn--go" phx-click="tour:next">
+            {if Walk.last?(@tour), do: @labels.done, else: @labels.next}
           </button>
         </div>
       </div>
     </div>
 
-    <script :type={Phoenix.LiveView.ColocatedHook} name=".Roadie">
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".Tour">
       // The server decides which step; this decides where everything sits.
       const GAP = 12
       const EDGE = 8
@@ -103,9 +103,9 @@ defmodule Roadie.Components do
           addEventListener("scroll", this.track, { passive: true, capture: true })
 
           this.onKey = (e) => {
-            if (e.key === "Escape") { e.preventDefault(); this.pushEvent("roadie:stop", {}) }
-            else if (e.key === "ArrowRight") { this.pushEvent("roadie:next", {}) }
-            else if (e.key === "ArrowLeft") { this.pushEvent("roadie:back", {}) }
+            if (e.key === "Escape") { e.preventDefault(); this.pushEvent("tour:stop", {}) }
+            else if (e.key === "ArrowRight") { this.pushEvent("tour:next", {}) }
+            else if (e.key === "ArrowLeft") { this.pushEvent("tour:back", {}) }
           }
           addEventListener("keydown", this.onKey)
 

@@ -2,7 +2,7 @@ defmodule PartyLineWeb.Tours do
   @moduledoc """
   The three guided tours, kept together so the copy reads as one voice.
 
-  Each is a list of Roadie steps pointing at real elements on a real page. The
+  Each is a list of Tour steps pointing at real elements on a real page. The
   selectors are the contract: if a class here stops existing, the tour quietly
   points at nothing, so `PartyLineWeb.ToursTest` renders each page and asserts
   every target is actually in the markup.
@@ -10,7 +10,7 @@ defmodule PartyLineWeb.Tours do
   This is the short, in-app version. The long cinematic pitch lives at `/tour`.
   """
 
-  import Roadie, only: [step: 2]
+  import Tour, only: [step: 2]
 
   @doc "The desktop: what this place is and the two doors out of it."
   def landing do

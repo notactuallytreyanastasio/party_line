@@ -1,6 +1,6 @@
 defmodule PartyLineWeb.ToursTest do
   @moduledoc """
-  A Roadie step points at a CSS selector, so a tour breaks silently when the
+  A Tour step points at a CSS selector, so a tour breaks silently when the
   markup it names drifts: the spotlight just lands on nothing. These render
   each real page and assert every target is present, which turns "the tour is
   broken" from something a newcomer discovers into a failing test.
@@ -59,10 +59,10 @@ defmodule PartyLineWeb.ToursTest do
       {:ok, view, html} = live(conn, "/")
 
       # nothing is showing until asked for
-      refute html =~ ~s(id="roadie")
+      refute html =~ ~s(id="tour")
 
       html = view |> element(~s{button[phx-click="show_me"]}) |> render_click()
-      assert html =~ ~s(id="roadie")
+      assert html =~ ~s(id="tour")
       assert html =~ "This is a party line"
       assert html =~ "1 of #{length(Tours.landing())}"
     end
@@ -71,22 +71,22 @@ defmodule PartyLineWeb.ToursTest do
       {:ok, view, _html} = live(conn, "/")
       view |> element(~s{button[phx-click="show_me"]}) |> render_click()
 
-      html = view |> element(~s{button[phx-click="roadie:next"]}) |> render_click()
+      html = view |> element(~s{button[phx-click="tour:next"]}) |> render_click()
       assert html =~ "Two ways in"
       assert html =~ "2 of"
 
-      html = view |> element(~s{button[phx-click="roadie:back"]}) |> render_click()
+      html = view |> element(~s{button[phx-click="tour:back"]}) |> render_click()
       assert html =~ "This is a party line"
 
-      html = view |> element(~s{button[phx-click="roadie:stop"]}) |> render_click()
-      refute html =~ ~s(id="roadie")
+      html = view |> element(~s{button[phx-click="tour:stop"]}) |> render_click()
+      refute html =~ ~s(id="tour")
     end
 
     test "the first step has no Back button to press", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/")
       view |> element(~s{button[phx-click="show_me"]}) |> render_click()
 
-      refute has_element?(view, ~s{button[phx-click="roadie:back"]})
+      refute has_element?(view, ~s{button[phx-click="tour:back"]})
     end
 
     test "walking off the end closes the tour", %{conn: conn} do
@@ -95,10 +95,10 @@ defmodule PartyLineWeb.ToursTest do
 
       html =
         Enum.reduce(Tours.landing(), nil, fn _step, _acc ->
-          view |> element(~s{button[phx-click="roadie:next"]}) |> render_click()
+          view |> element(~s{button[phx-click="tour:next"]}) |> render_click()
         end)
 
-      refute html =~ ~s(id="roadie")
+      refute html =~ ~s(id="tour")
     end
   end
 
@@ -116,13 +116,13 @@ defmodule PartyLineWeb.ToursTest do
     {:ok, view, _html} = live(conn, "/boards")
     view |> element(~s{button[phx-click="show_me"]}) |> render_click()
 
-    # Roadie attaches a handle_event hook to the host LiveView; the page's own
+    # Tour attaches a handle_event hook to the host LiveView; the page's own
     # events must still land, or the library would be eating them
     view
     |> element(~s{button[phx-value-id="#{post.id}"][phx-value-dir="up"]})
     |> render_click()
 
     assert PartyLine.Boards.get(PartyLine.Boards, post.id).ups == 1
-    assert has_element?(view, "#roadie")
+    assert has_element?(view, "#tour")
   end
 end

@@ -1,4 +1,4 @@
-defmodule Roadie.Step do
+defmodule Tour.Step do
   @moduledoc """
   One stop on a tour: a thing on the page, and what to say about it.
 
@@ -37,8 +37,8 @@ defmodule Roadie.Step do
   @doc """
   Build a step.
 
-      Roadie.Step.new("#speak-form", title: "Say something", body: "Type here.")
-      Roadie.Step.new(nil, title: "Welcome", body: "Ten seconds, tops.")
+      Tour.Step.new("#speak-form", title: "Say something", body: "Type here.")
+      Tour.Step.new(nil, title: "Welcome", body: "Ten seconds, tops.")
 
   Options:
 
@@ -59,7 +59,7 @@ defmodule Roadie.Step do
     {title, opts} = Keyword.pop(opts, :title)
 
     unless is_binary(title) and title != "" do
-      raise ArgumentError, "a Roadie step needs a :title (target: #{inspect(target)})"
+      raise ArgumentError, "a Tour step needs a :title (target: #{inspect(target)})"
     end
 
     placement = Keyword.get(opts, :placement, :auto)

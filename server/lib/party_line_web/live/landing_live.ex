@@ -46,7 +46,7 @@ defmodule PartyLineWeb.LandingLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    socket = Roadie.attach(socket, :landing, PartyLineWeb.Tours.landing())
+    socket = Tour.attach(socket, :landing, PartyLineWeb.Tours.landing())
 
     {:ok,
      assign(socket,
@@ -63,7 +63,7 @@ defmodule PartyLineWeb.LandingLive do
 
   @impl true
   def handle_event("show_me", _params, socket) do
-    {:noreply, Roadie.start(socket, :landing)}
+    {:noreply, Tour.start(socket, :landing)}
   end
 
   def handle_event("toggle_start", _params, socket) do
@@ -101,7 +101,7 @@ defmodule PartyLineWeb.LandingLive do
     ~H"""
     <div class="retro-desktop">
       <.skin_toggle />
-      <Roadie.Components.roadie roadie={@roadie} class="roadie--party" />
+      <Tour.Components.tour tour={@tour} class="tour--party" />
       <pre class="retro-crash retro-crash--1" aria-hidden="true">{crash(1)}</pre>
       <pre class="retro-crash retro-crash--2" aria-hidden="true">{crash(2)}</pre>
       <pre class="retro-crash retro-crash--3" aria-hidden="true">{crash(3)}</pre>

@@ -1,7 +1,7 @@
-defmodule Roadie.StepTest do
+defmodule Tour.StepTest do
   use ExUnit.Case, async: true
 
-  alias Roadie.Step
+  alias Tour.Step
 
   test "a step points at a selector and says something about it" do
     step = Step.new("#speak-form", title: "Say something", body: "Type here.", placement: :top)

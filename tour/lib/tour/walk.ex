@@ -1,4 +1,4 @@
-defmodule Roadie.Tour do
+defmodule Tour.Walk do
   @moduledoc """
   A named sequence of steps and where you are in it.
 
@@ -11,7 +11,7 @@ defmodule Roadie.Tour do
   `next/1` on the last step is how a tour normally ends.
   """
 
-  alias Roadie.Step
+  alias Tour.Step
 
   @enforce_keys [:id, :steps]
   defstruct [:id, :steps, index: 0, running?: false, done?: false]

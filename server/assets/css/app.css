@@ -3,7 +3,7 @@
 
 @import "tailwindcss" source(none);
 @import "phoenix-colocated/party_line/colocated.css";
-@import "../../../roadie/priv/static/roadie.css";
+@import "../../../tour/priv/static/tour.css";
 @source "../css";
 @source "../js";
 @source "../../lib/party_line_web";
@@ -840,7 +840,7 @@ html[data-pl-theme="modern"] {
    gouache. Deliberately single-skin: this page commits to one visual world,
    so it does not follow the retro/modern toggle the rest of the app uses.
    ───────────────────────────────────────────────────────────────────────── */
-.tour {
+.reel {
   --paper: #fbf8fc;
   --ink: #4a4258;
   --ink-soft: #7d7290;
@@ -868,7 +868,7 @@ html[data-pl-theme="modern"] {
 }
 
 /* Each beat is one screen. dvh so mobile browser chrome can't clip it. */
-.tour-scene {
+.reel-scene {
   position: relative;
   min-height: 100dvh;
   /* the washes are sized to bleed off every edge; clipping them here (rather
@@ -885,8 +885,8 @@ html[data-pl-theme="modern"] {
 }
 
 /* The wash: two soft watercolor blooms per scene, hue set by --a / --b. */
-.tour-scene::before,
-.tour-scene::after {
+.reel-scene::before,
+.reel-scene::after {
   content: "";
   position: absolute;
   z-index: -1;
@@ -895,26 +895,26 @@ html[data-pl-theme="modern"] {
   opacity: .55;
   pointer-events: none;
 }
-.tour-scene::before {
+.reel-scene::before {
   width: 62vw; height: 62vw;
   top: -14vw; left: -12vw;
   background: var(--a, var(--wisteria));
 }
-.tour-scene::after {
+.reel-scene::after {
   width: 52vw; height: 52vw;
   bottom: -16vw; right: -10vw;
   background: var(--b, var(--peony));
 }
 
-.tour-scene--1 { --a: var(--wisteria); --b: var(--peony); }
-.tour-scene--2 { --a: var(--peony);    --b: var(--apricot); }
-.tour-scene--3 { --a: var(--sky);      --b: var(--wisteria); }
-.tour-scene--4 { --a: var(--sage);     --b: var(--sky); }
-.tour-scene--5 { --a: var(--apricot);  --b: var(--sage); }
-.tour-scene--6 { --a: var(--wisteria); --b: var(--sky); }
+.reel-scene--1 { --a: var(--wisteria); --b: var(--peony); }
+.reel-scene--2 { --a: var(--peony);    --b: var(--apricot); }
+.reel-scene--3 { --a: var(--sky);      --b: var(--wisteria); }
+.reel-scene--4 { --a: var(--sage);     --b: var(--sky); }
+.reel-scene--5 { --a: var(--apricot);  --b: var(--sage); }
+.reel-scene--6 { --a: var(--wisteria); --b: var(--sky); }
 
 /* ── The window ─────────────────────────────────────────────────────────── */
-.tour-win {
+.reel-win {
   width: min(680px, 100%);
   background: var(--chrome);
   border-radius: 8px;
@@ -928,10 +928,10 @@ html[data-pl-theme="modern"] {
   transition: opacity .7s cubic-bezier(.22, 1, .36, 1),
               transform .7s cubic-bezier(.22, 1, .36, 1);
 }
-.tour-win.is-in { opacity: 1; transform: none; }
+.reel-win.is-in { opacity: 1; transform: none; }
 
 /* The signature chrome move: a wet gradient where 95 had solid navy. */
-.tour-titlebar {
+.reel-titlebar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -943,18 +943,18 @@ html[data-pl-theme="modern"] {
   letter-spacing: .02em;
   text-shadow: 0 1px 1px rgba(74, 66, 88, .28);
 }
-.tour-titlebar-title { flex: 1; }
-.tour-dots { display: flex; gap: 5px; }
-.tour-dots i {
+.reel-titlebar-title { flex: 1; }
+.reel-dots { display: flex; gap: 5px; }
+.reel-dots i {
   width: 11px; height: 11px; border-radius: 3px;
   background: rgba(255, 255, 255, .55);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .8);
 }
 
-.tour-body { background: #fff; padding: clamp(18px, 3vw, 28px); }
+.reel-body { background: #fff; padding: clamp(18px, 3vw, 28px); }
 
 /* ── Editorial voice ────────────────────────────────────────────────────── */
-.tour-eyebrow {
+.reel-eyebrow {
   font-family: var(--mono);
   font-size: .66rem;
   letter-spacing: .14em;
@@ -962,7 +962,7 @@ html[data-pl-theme="modern"] {
   color: var(--ink-soft);
   margin-bottom: 10px;
 }
-.tour-h {
+.reel-h {
   font-family: var(--serif);
   font-weight: 400;
   font-size: clamp(1.6rem, 4.2vw, 2.5rem);
@@ -971,8 +971,8 @@ html[data-pl-theme="modern"] {
   text-wrap: balance;
   margin: 0 0 12px;
 }
-.tour-h em { font-style: italic; color: #a87fb8; }
-.tour-p {
+.reel-h em { font-style: italic; color: #a87fb8; }
+.reel-p {
   font-family: var(--serif);
   font-size: clamp(.98rem, 1.5vw, 1.08rem);
   line-height: 1.6;
@@ -982,7 +982,7 @@ html[data-pl-theme="modern"] {
 }
 
 /* ── The chat ───────────────────────────────────────────────────────────── */
-.tour-chat {
+.reel-chat {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -992,7 +992,7 @@ html[data-pl-theme="modern"] {
   box-shadow: inset 1px 1px 0 var(--chrome-lo), inset -1px -1px 0 #fff;
   min-height: 132px;
 }
-.tour-msg {
+.reel-msg {
   position: relative;
   font-family: var(--ui);
   font-size: .9rem;
@@ -1001,14 +1001,14 @@ html[data-pl-theme="modern"] {
   transform: translateY(6px);
   transition: opacity .45s ease, transform .45s cubic-bezier(.22, 1, .36, 1);
 }
-.tour-msg.is-in { opacity: 1; transform: none; }
-.tour-who { font-weight: 700; color: #9a6fae; margin-right: 6px; }
-.tour-msg--you .tour-who { color: #5d8ab8; }
-.tour-msg--op .tour-who { color: #6f9e78; }
-.tour-msg--op { font-style: italic; }
+.reel-msg.is-in { opacity: 1; transform: none; }
+.reel-who { font-weight: 700; color: #9a6fae; margin-right: 6px; }
+.reel-msg--you .reel-who { color: #5d8ab8; }
+.reel-msg--op .reel-who { color: #6f9e78; }
+.reel-msg--op { font-style: italic; }
 
 /* Ink hitting wet paper: the blot spreads once, behind the finished line. */
-.tour-msg::before {
+.reel-msg::before {
   content: "";
   position: absolute;
   z-index: -1;
@@ -1018,30 +1018,30 @@ html[data-pl-theme="modern"] {
   opacity: 0;
   transform: scale(.7);
 }
-.tour-msg.is-bloom::before {
-  animation: tour-bloom 1.5s cubic-bezier(.22, 1, .36, 1) forwards;
+.reel-msg.is-bloom::before {
+  animation: reel-bloom 1.5s cubic-bezier(.22, 1, .36, 1) forwards;
 }
-@keyframes tour-bloom {
+@keyframes reel-bloom {
   0%   { opacity: 0;   transform: scale(.7); }
   35%  { opacity: .34; transform: scale(1); }
   100% { opacity: .12; transform: scale(1.04); }
 }
 
 /* The caret only exists while a line is being typed. */
-.tour-msg.is-typing .tour-msg-body::after {
+.reel-msg.is-typing .reel-msg-body::after {
   content: "";
   display: inline-block;
   width: 7px; height: 1em;
   margin-left: 2px;
   vertical-align: -2px;
   background: var(--ink);
-  animation: tour-caret .9s steps(2, start) infinite;
+  animation: reel-caret .9s steps(2, start) infinite;
 }
-@keyframes tour-caret { to { opacity: 0; } }
+@keyframes reel-caret { to { opacity: 0; } }
 
 /* ── Controls ───────────────────────────────────────────────────────────── */
-.tour-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
-.tour-btn {
+.reel-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.reel-btn {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -1058,23 +1058,23 @@ html[data-pl-theme="modern"] {
   box-shadow: inset 1.5px 1.5px 0 var(--chrome-hi), inset -1.5px -1.5px 0 var(--chrome-lo);
   transition: transform .18s cubic-bezier(.22, 1, .36, 1), box-shadow .18s ease;
 }
-.tour-btn:hover { transform: translateY(-1px); }
-.tour-btn:active {
+.reel-btn:hover { transform: translateY(-1px); }
+.reel-btn:active {
   transform: translateY(0);
   box-shadow: inset -1.5px -1.5px 0 var(--chrome-hi), inset 1.5px 1.5px 0 var(--chrome-lo);
 }
-.tour-btn--go {
+.reel-btn--go {
   background: linear-gradient(100deg, var(--a, var(--wisteria)), var(--b, var(--peony)));
   color: #fff;
   text-shadow: 0 1px 1px rgba(74, 66, 88, .3);
 }
-.tour :is(a, button):focus-visible {
+.reel :is(a, button):focus-visible {
   outline: 2px solid #8d6fa8;
   outline-offset: 3px;
 }
 
 /* ── Statusbar + scroll cue ─────────────────────────────────────────────── */
-.tour-status {
+.reel-status {
   display: flex;
   justify-content: space-between;
   gap: 10px;
@@ -1085,7 +1085,7 @@ html[data-pl-theme="modern"] {
   font-size: .64rem;
   color: var(--ink-soft);
 }
-.tour-cue {
+.reel-cue {
   position: absolute;
   bottom: 18px; left: 50%;
   transform: translateX(-50%);
@@ -1095,29 +1095,29 @@ html[data-pl-theme="modern"] {
   text-transform: uppercase;
   color: var(--ink-soft);
   opacity: .8;
-  animation: tour-cue 2.4s ease-in-out infinite;
+  animation: reel-cue 2.4s ease-in-out infinite;
 }
-@keyframes tour-cue {
+@keyframes reel-cue {
   0%, 100% { transform: translate(-50%, 0); opacity: .45; }
   50%      { transform: translate(-50%, 5px); opacity: .9; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tour { scroll-behavior: auto; }
-  .tour-win { opacity: 1; transform: none; transition: none; }
-  .tour-msg { opacity: 1; transform: none; transition: none; }
-  .tour-cue, .tour-msg.is-bloom::before { animation: none; }
-  .tour-msg.is-bloom::before { opacity: .12; transform: scale(1); }
+  .reel { scroll-behavior: auto; }
+  .reel-win { opacity: 1; transform: none; transition: none; }
+  .reel-msg { opacity: 1; transform: none; transition: none; }
+  .reel-cue, .reel-msg.is-bloom::before { animation: none; }
+  .reel-msg.is-bloom::before { opacity: .12; transform: scale(1); }
 }
 
 /* ── The 95 frame ───────────────────────────────────────────────────────────
    The taskbar is fixed and outlives every scene: that persistence is what
    sells "running inside Windows 95" while the windows themselves stay soft.
    ─────────────────────────────────────────────────────────────────────────── */
-.tour-scene { padding-bottom: calc(38px + clamp(16px, 4vw, 48px)); }
-.tour-cue { bottom: 52px; }
+.reel-scene { padding-bottom: calc(38px + clamp(16px, 4vw, 48px)); }
+.reel-cue { bottom: 52px; }
 
-.tour-taskbar {
+.reel-taskbar {
   position: fixed;
   left: 0; right: 0; bottom: 0;
   z-index: 10;
@@ -1132,7 +1132,7 @@ html[data-pl-theme="modern"] {
     0 -10px 30px -14px rgba(74, 66, 88, .45);
 }
 
-.tour-start {
+.reel-start {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -1149,23 +1149,23 @@ html[data-pl-theme="modern"] {
   box-shadow: inset 1.5px 1.5px 0 rgba(255, 255, 255, .5), 0 2px 8px -2px rgba(74, 66, 88, .4);
   transition: transform .18s cubic-bezier(.22, 1, .36, 1);
 }
-.tour-start:hover { transform: translateY(-1px); }
+.reel-start:hover { transform: translateY(-1px); }
 
 /* the four panes, leaning into the wind */
-.tour-flag {
+.reel-flag {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1.5px;
   width: 15px; height: 15px;
   transform: skewY(-8deg);
 }
-.tour-flag i { border-radius: 1.5px; }
-.tour-flag i:nth-child(1) { background: #fff; opacity: .95; }
-.tour-flag i:nth-child(2) { background: var(--apricot); }
-.tour-flag i:nth-child(3) { background: var(--sage); }
-.tour-flag i:nth-child(4) { background: var(--sky); }
+.reel-flag i { border-radius: 1.5px; }
+.reel-flag i:nth-child(1) { background: #fff; opacity: .95; }
+.reel-flag i:nth-child(2) { background: var(--apricot); }
+.reel-flag i:nth-child(3) { background: var(--sage); }
+.reel-flag i:nth-child(4) { background: var(--sky); }
 
-.tour-task {
+.reel-task {
   /* a 95 task button is a button, not a stretched bar */
   width: min(260px, 42vw);
   padding: 6px 10px;
@@ -1177,7 +1177,7 @@ html[data-pl-theme="modern"] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.tour-tray {
+.reel-tray {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1190,8 +1190,8 @@ html[data-pl-theme="modern"] {
 }
 
 /* Real 95 controls: square, beveled, right-hand side — not mac dots. */
-.tour-ctrls { display: flex; gap: 3px; }
-.tour-ctrls button {
+.reel-ctrls { display: flex; gap: 3px; }
+.reel-ctrls button {
   width: 17px; height: 15px;
   display: grid;
   place-items: center;
@@ -1208,7 +1208,7 @@ html[data-pl-theme="modern"] {
 }
 
 @media (max-width: 620px) {
-  .tour-task { display: none; }
+  .reel-task { display: none; }
 }
 
 /* the way in to /tour from the desktop — reads as a 95 hyperlink */
@@ -1219,7 +1219,7 @@ html[data-pl-theme="modern"] {
 .retro-tourline a { color: #0000c0; }
 html[data-pl-theme="modern"] .retro-tourline a { color: #10a37f; }
 
-/* "show me around" — the way into a Roadie tour from a page's own chrome */
+/* "show me around" — the way into a Tour tour from a page's own chrome */
 .retro-linkbtn {
   background: none;
   border: 0;
@@ -1252,42 +1252,42 @@ html[data-pl-theme="modern"] .retro-showme {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
 }
 
-/* Roadie wears the party line's clothes: same tokens, no selector fighting. */
-.roadie--party {
-  --roadie-veil: rgba(12, 24, 32, 0.66);
-  --roadie-surface: #c0c0c0;
-  --roadie-ink: #000;
-  --roadie-ink-soft: #404040;
-  --roadie-accent: #000080;
-  --roadie-accent-ink: #fff;
-  --roadie-radius: 0px;
-  --roadie-shadow: 4px 4px 0 rgba(0, 0, 0, 0.45);
-  --roadie-font: "Chicago", "Charcoal", "Geneva", "MS Sans Serif", "Tahoma", "Verdana", sans-serif;
+/* Tour wears the party line's clothes: same tokens, no selector fighting. */
+.tour--party {
+  --tour-veil: rgba(12, 24, 32, 0.66);
+  --tour-surface: #c0c0c0;
+  --tour-ink: #000;
+  --tour-ink-soft: #404040;
+  --tour-accent: #000080;
+  --tour-accent-ink: #fff;
+  --tour-radius: 0px;
+  --tour-shadow: 4px 4px 0 rgba(0, 0, 0, 0.45);
+  --tour-font: "Chicago", "Charcoal", "Geneva", "MS Sans Serif", "Tahoma", "Verdana", sans-serif;
 }
-.roadie--party .roadie-card {
+.tour--party .tour-card {
   border: 1px solid #000;
-  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #404040, var(--roadie-shadow);
+  box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #404040, var(--tour-shadow);
 }
-.roadie--party .roadie-btn {
+.tour--party .tour-btn {
   border: 1px solid #000;
   box-shadow: inset 1px 1px 0 #fff, inset -1px -1px 0 #404040;
 }
-.roadie--party .roadie-btn:active {
+.tour--party .tour-btn:active {
   box-shadow: inset -1px -1px 0 #fff, inset 1px 1px 0 #404040;
 }
-.roadie--party .roadie-btn--ghost { border-color: transparent; box-shadow: none; }
+.tour--party .tour-btn--ghost { border-color: transparent; box-shadow: none; }
 
-html[data-pl-theme="modern"] .roadie--party {
-  --roadie-surface: #fff;
-  --roadie-ink: #202123;
-  --roadie-ink-soft: #6e6e80;
-  --roadie-accent: #10a37f;
-  --roadie-radius: 10px;
-  --roadie-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.35);
-  --roadie-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+html[data-pl-theme="modern"] .tour--party {
+  --tour-surface: #fff;
+  --tour-ink: #202123;
+  --tour-ink-soft: #6e6e80;
+  --tour-accent: #10a37f;
+  --tour-radius: 10px;
+  --tour-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.35);
+  --tour-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
 }
-html[data-pl-theme="modern"] .roadie--party .roadie-card,
-html[data-pl-theme="modern"] .roadie--party .roadie-btn {
+html[data-pl-theme="modern"] .tour--party .tour-card,
+html[data-pl-theme="modern"] .tour--party .tour-btn {
   border: 0;
-  box-shadow: var(--roadie-shadow);
+  box-shadow: var(--tour-shadow);
 }

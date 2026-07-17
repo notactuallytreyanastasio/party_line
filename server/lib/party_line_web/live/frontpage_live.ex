@@ -14,7 +14,7 @@ defmodule PartyLineWeb.FrontpageLive do
 
   @impl true
   def mount(_params, session, socket) do
-    socket = Roadie.attach(socket, :boards, PartyLineWeb.Tours.boards())
+    socket = Tour.attach(socket, :boards, PartyLineWeb.Tours.boards())
 
     if connected?(socket), do: Boards.subscribe()
     voter = session["boards_voter"] || anon()
@@ -43,7 +43,7 @@ defmodule PartyLineWeb.FrontpageLive do
 
   @impl true
   def handle_event("show_me", _params, socket) do
-    {:noreply, Roadie.start(socket, :boards)}
+    {:noreply, Tour.start(socket, :boards)}
   end
 
   def handle_event("vote", %{"id" => id, "dir" => dir}, socket) do
@@ -73,7 +73,7 @@ defmodule PartyLineWeb.FrontpageLive do
     ~H"""
     <div class="retro-desktop retro-desktop--boards">
       <.skin_toggle />
-      <Roadie.Components.roadie roadie={@roadie} class="roadie--party" />
+      <Tour.Components.tour tour={@tour} class="tour--party" />
       <button type="button" class="retro-showme" phx-click="show_me">? show me around</button>
       <div class="retro-window retro-window--boards">
         <div class="retro-titlebar">
@@ -122,7 +122,7 @@ defmodule PartyLineWeb.FrontpageLive do
     ~H"""
     <div class="retro-desktop retro-desktop--boards">
       <.skin_toggle />
-      <Roadie.Components.roadie roadie={@roadie} class="roadie--party" />
+      <Tour.Components.tour tour={@tour} class="tour--party" />
       <button type="button" class="retro-showme" phx-click="show_me">? show me around</button>
       <div class="retro-window retro-window--boards">
         <div class="retro-titlebar">
@@ -158,7 +158,7 @@ defmodule PartyLineWeb.FrontpageLive do
     ~H"""
     <div class="retro-desktop retro-desktop--boards">
       <.skin_toggle />
-      <Roadie.Components.roadie roadie={@roadie} class="roadie--party" />
+      <Tour.Components.tour tour={@tour} class="tour--party" />
       <button type="button" class="retro-showme" phx-click="show_me">? show me around</button>
       <div class="retro-window retro-window--boards">
         <div class="retro-titlebar">

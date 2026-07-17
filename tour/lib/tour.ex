@@ -1,9 +1,9 @@
-defmodule Roadie do
+defmodule Tour do
   @moduledoc """
   Guided product tours for Phoenix LiveView — a spotlight that rides on top of
   your real UI.
 
-  Roadie does not build you a tour page. It dims your actual app, cuts a hole
+  Tour does not build you a tour page. It dims your actual app, cuts a hole
   around a real element, and floats a card next to it. The thing being
   explained is the thing on screen.
 
@@ -13,27 +13,27 @@ defmodule Roadie do
 
       def mount(_params, _session, socket) do
         {:ok,
-         Roadie.attach(socket, :onboarding, [
-           Roadie.step(nil, title: "This is the line", body: "Ten seconds, tops."),
-           Roadie.step("#speak-form", title: "Say something", body: "Type here. The room answers.", placement: :top),
-           Roadie.step("#buddy-list", title: "Who's on", body: "@ any of them and they turn.", placement: :left)
+         Tour.attach(socket, :onboarding, [
+           Tour.step(nil, title: "This is the line", body: "Ten seconds, tops."),
+           Tour.step("#speak-form", title: "Say something", body: "Type here. The room answers.", placement: :top),
+           Tour.step("#buddy-list", title: "Who's on", body: "@ any of them and they turn.", placement: :left)
          ])}
       end
 
       def handle_event("help", _params, socket) do
-        {:noreply, Roadie.start(socket, :onboarding)}
+        {:noreply, Tour.start(socket, :onboarding)}
       end
 
       def render(assigns) do
         ~H\"""
         ...your app...
-        <Roadie.Components.roadie roadie={@roadie} />
+        <Tour.Components.tour tour={@tour} />
         \"""
       end
 
-  There is no `use Roadie`, and you do not write `handle_event` clauses for
+  There is no `use Tour`, and you do not write `handle_event` clauses for
   Next/Back/Skip. `attach/4` installs a `handle_event` lifecycle hook that
-  answers Roadie's own events and passes everything else through untouched, so
+  answers Tour's own events and passes everything else through untouched, so
   the library stays out of your LiveView's namespace.
 
   ## Where the work happens
@@ -42,7 +42,7 @@ defmodule Roadie do
   That split is deliberate — geometry belongs to the only process that can
   measure it, and step order belongs to the only process you can test without
   a browser. Positioning, flipping, scrolling and keyboard live in the
-  colocated hook; everything in Elixir is a pure function over `Roadie.Tour`.
+  colocated hook; everything in Elixir is a pure function over `Tour.Walk`.
 
   ## Multiple tours
 
@@ -51,10 +51,10 @@ defmodule Roadie do
   """
 
   alias Phoenix.LiveView
-  alias Roadie.{Step, Tour}
+  alias Tour.{Step, Walk}
 
-  @assign :roadie
-  @hook :roadie
+  @assign :tour
+  @hook :tour
 
   defdelegate step(target, opts \\ []), to: Step, as: :new
 
@@ -67,8 +67,8 @@ defmodule Roadie do
   """
   @spec attach(LiveView.Socket.t(), atom(), [Step.t()], keyword()) :: LiveView.Socket.t()
   def attach(socket, id, steps, opts \\ []) when is_atom(id) and is_list(steps) do
-    tour = Tour.new(id, steps)
-    tour = if Keyword.get(opts, :start, false), do: Tour.start(tour), else: tour
+    tour = Walk.new(id, steps)
+    tour = if Keyword.get(opts, :start, false), do: Walk.start(tour), else: tour
 
     state = state(socket)
     active = if tour.running?, do: id, else: state.active
@@ -88,7 +88,7 @@ defmodule Roadie do
         tours =
           state.tours
           |> halt(state.active)
-          |> Map.put(id, Tour.start(tour))
+          |> Map.put(id, Walk.start(tour))
 
         put_state(socket, %{state | tours: tours, active: id})
 
@@ -104,22 +104,22 @@ defmodule Roadie do
 
   defp halt(tours, id) do
     case Map.get(tours, id) do
-      %Tour{running?: true} = tour -> Map.put(tours, id, Tour.stop(tour))
+      %Walk{running?: true} = tour -> Map.put(tours, id, Walk.stop(tour))
       _ -> tours
     end
   end
 
   @doc "Stop the running tour, if any. Safe to call when nothing is running."
   @spec stop(LiveView.Socket.t()) :: LiveView.Socket.t()
-  def stop(socket), do: update_active(socket, &Tour.stop/1)
+  def stop(socket), do: update_active(socket, &Walk.stop/1)
 
   @doc "Advance the running tour. On the last step, this finishes it."
   @spec next(LiveView.Socket.t()) :: LiveView.Socket.t()
-  def next(socket), do: update_active(socket, &Tour.next/1)
+  def next(socket), do: update_active(socket, &Walk.next/1)
 
   @doc "Step the running tour back."
   @spec back(LiveView.Socket.t()) :: LiveView.Socket.t()
-  def back(socket), do: update_active(socket, &Tour.back/1)
+  def back(socket), do: update_active(socket, &Walk.back/1)
 
   @doc """
   The running tour, or nil.
@@ -128,13 +128,13 @@ defmodule Roadie do
   the state stays inspectable. Whether a tour is *running* is the tour's own
   business, so this asks it rather than trusting the pointer.
   """
-  @spec running(LiveView.Socket.t() | map() | nil) :: Tour.t() | nil
+  @spec running(LiveView.Socket.t() | map() | nil) :: Walk.t() | nil
   def running(%LiveView.Socket{} = socket), do: socket |> state() |> running()
   def running(%{active: nil}), do: nil
 
   def running(%{active: id, tours: tours}) do
     case Map.get(tours, id) do
-      %Tour{running?: true} = tour -> tour
+      %Walk{running?: true} = tour -> tour
       _ -> nil
     end
   end
@@ -152,26 +152,26 @@ defmodule Roadie do
 
   # ── The lifecycle hook ──────────────────────────────────────────────────
   #
-  # Attached once. Roadie's own events halt here; everything else continues to
+  # Attached once. Tour's own events halt here; everything else continues to
   # the host LiveView, which never learns this happened.
   @doc false
-  def on_event("roadie:next", _params, socket), do: {:halt, next(socket)}
-  def on_event("roadie:back", _params, socket), do: {:halt, back(socket)}
-  def on_event("roadie:stop", _params, socket), do: {:halt, stop(socket)}
+  def on_event("tour:next", _params, socket), do: {:halt, next(socket)}
+  def on_event("tour:back", _params, socket), do: {:halt, back(socket)}
+  def on_event("tour:stop", _params, socket), do: {:halt, stop(socket)}
 
-  def on_event("roadie:goto", %{"index" => index}, socket) do
-    {:halt, update_active(socket, &Tour.goto(&1, to_int(index)))}
+  def on_event("tour:goto", %{"index" => index}, socket) do
+    {:halt, update_active(socket, &Walk.goto(&1, to_int(index)))}
   end
 
   def on_event(_event, _params, socket), do: {:cont, socket}
 
   defp ensure_hook(socket) do
-    if socket.assigns[:__roadie_hooked__] do
+    if socket.assigns[:__tour_hooked__] do
       socket
     else
       socket
       |> LiveView.attach_hook(@hook, :handle_event, &on_event/3)
-      |> Phoenix.Component.assign(:__roadie_hooked__, true)
+      |> Phoenix.Component.assign(:__tour_hooked__, true)
     end
   end
 
