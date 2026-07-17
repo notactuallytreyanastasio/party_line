@@ -15,6 +15,13 @@ defmodule PartyLineWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # the public completion API: OpenAI/Anthropic-shaped, keyed by an
+  # atproto-bound bearer token (PartyLineWeb.Plugs.ApiAuth)
+  pipeline :completion_api do
+    plug :accepts, ["json"]
+    plug PartyLineWeb.Plugs.ApiAuth
+  end
+
   scope "/", PartyLineWeb do
     pipe_through :browser
 
@@ -48,6 +55,15 @@ defmodule PartyLineWeb.Router do
     post "/hosts/register", HostController, :register
     post "/hosts/:id/heartbeat", HostController, :heartbeat
     delete "/hosts/:id", HostController, :deregister
+  end
+
+  # OpenAI/Anthropic-compatible completion API over the federated exchange.
+  scope "/v1", PartyLineWeb do
+    pipe_through :completion_api
+
+    post "/chat/completions", ChatCompletionsController, :create
+    post "/messages", MessagesController, :create
+    get "/models", ModelsController, :index
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

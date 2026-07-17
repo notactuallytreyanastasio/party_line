@@ -94,7 +94,10 @@ defmodule PartyLine.MixProject do
       # No library does the full OAuth orchestration (PAR/authorize/token) —
       # that lives in PartyLine.ATProto.OAuth — but this covers the crypto.
       {:aether_atproto, "~> 0.1.5"},
-      {:jose, "~> 1.11"}
+      {:jose, "~> 1.11"},
+      # canonical chat message + OpenAI/Anthropic wire modeling for the public
+      # completion API, and the client we dogfood it with
+      {:langchain, "~> 0.9.2"}
     ]
   end
 
