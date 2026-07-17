@@ -29,14 +29,13 @@ defmodule PartyLine.Boards.SchedulerPolicy do
 
   @doc """
   Choose a board to post to. `board_freshness` maps board => newest post's
-  unix ts (or nil if empty). Emptiest first, then stalest.
+  unix ts (or nil if empty). Emptiest first, then stalest, ties by name.
+  Returns nil when there are no boards.
   """
+  def pick_board([], _board_freshness), do: nil
+
   def pick_board(boards, board_freshness) do
-    Enum.min_by(boards, fn b -> {board_freshness[b] || :nil_low, b} end, fn -> nil end)
-    |> then(fn
-      nil -> Enum.random(boards)
-      b -> b
-    end)
+    Enum.min_by(boards, fn b -> {freshness_key(board_freshness[b]), b} end)
   end
 
   # nil (empty board) must sort BEFORE any timestamp; map it to -infinity

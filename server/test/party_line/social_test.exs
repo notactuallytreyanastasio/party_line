@@ -69,10 +69,10 @@ defmodule PartyLine.SocialTest do
       {:ok, dms} = DMs.start_link(name: nil)
       Phoenix.PubSub.subscribe(PartyLine.PubSub, DMs.topic("ada"))
 
-      {:ok, _} = DMs.send_dm(dms, "bo", "ada", "psst")
+      {:ok, _} = DMs.send_dm(dms, "bo", "ada", "psst", [])
       assert_receive {:dm, "bo", %{body: "psst", from: "bo", to: "ada", kind: :text}}
 
-      {:ok, _} = DMs.send_dm(dms, "ada", "bo", "what")
+      {:ok, _} = DMs.send_dm(dms, "ada", "bo", "what", [])
       assert [%{body: "psst"}, %{body: "what"}] = DMs.history(dms, "ada", "bo")
       # order of names doesn't matter
       assert length(DMs.history(dms, "bo", "ada")) == 2
@@ -91,7 +91,7 @@ defmodule PartyLine.SocialTest do
       {:ok, dms} = DMs.start_link(name: nil)
 
       for n <- 1..205 do
-        {:ok, _} = DMs.send_dm(dms, "erowid smoothie", "horse dentist", "m-#{n}")
+        {:ok, _} = DMs.send_dm(dms, "erowid smoothie", "horse dentist", "m-#{n}", [])
       end
 
       history = DMs.history(dms, "erowid smoothie", "horse dentist")
@@ -105,7 +105,7 @@ defmodule PartyLine.SocialTest do
       {:ok, dms} = DMs.start_link(name: nil)
       Phoenix.PubSub.subscribe(PartyLine.PubSub, DMs.topic("coupon warlock fan"))
 
-      {:ok, _} = DMs.send_dm(dms, "coupon warlock fan", "coupon warlock fan", "note to self")
+      {:ok, _} = DMs.send_dm(dms, "coupon warlock fan", "coupon warlock fan", "note to self", [])
 
       assert_receive {:dm, "coupon warlock fan", %{body: "note to self"}}
       refute_receive {:dm, _, _}
@@ -120,7 +120,7 @@ defmodule PartyLine.SocialTest do
       {:ok, dms} = DMs.start_link(name: nil)
       Phoenix.PubSub.subscribe(PartyLine.PubSub, DMs.topic("erowid smoothie"))
 
-      {:ok, _} = DMs.send_dm(dms, "horse dentist", "erowid smoothie", "u up")
+      {:ok, _} = DMs.send_dm(dms, "horse dentist", "erowid smoothie", "u up", [])
       assert_receive {:dm, "horse dentist", %{body: "u up", to: "erowid smoothie"}}
     end
   end

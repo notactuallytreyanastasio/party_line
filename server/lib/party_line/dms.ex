@@ -18,7 +18,10 @@ defmodule PartyLine.DMs do
     GenServer.start_link(__MODULE__, %{}, name: Keyword.get(opts, :name, @name))
   end
 
-  def send_dm(server \\ @name, from, to, body, opts \\ []) do
+  # opts has no default on purpose: defaults at both ends made send_dm/4
+  # ambiguous (server-first vs opts-last), and the loser was a crash.
+  def send_dm(server \\ @name, from, to, body, opts)
+      when is_binary(from) and is_list(opts) do
     GenServer.call(server, {:send, from, to, body, opts})
   end
 

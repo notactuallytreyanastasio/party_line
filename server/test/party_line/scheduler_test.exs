@@ -15,6 +15,17 @@ defmodule PartyLine.Boards.SchedulerTest do
                "a"
     end
 
+    test "pick_board: empty boards first, then stalest, ties by name, nil when boardless" do
+      boards = ~w(a b c)
+      # regression: the old :nil_low sentinel sorted AFTER integers, so a
+      # never-posted board lost to any timestamped one
+      assert SchedulerPolicy.pick_board(boards, %{"a" => 1000, "c" => 5000}) == "b"
+      assert SchedulerPolicy.pick_board(boards, %{"a" => 1000, "b" => 9000, "c" => 5000}) == "a"
+      # two empty boards tie → first by name
+      assert SchedulerPolicy.pick_board(boards, %{"a" => 1000}) == "b"
+      assert SchedulerPolicy.pick_board([], %{}) == nil
+    end
+
     test "persona pick: fewest posts on this board, then least-recently assigned" do
       online = ~w(Ada Bo Cy)
       counts = %{{"x", "Ada"} => 3, {"x", "Bo"} => 1}

@@ -213,11 +213,8 @@ defmodule PartyLineWeb.RoomLiveTest do
     assert on_the_line(view, "room-default") == base
   end
 
-  # App bug: DMs.send_dm/5 has two defaults (server \\ @name, opts \\ []), so the
-  # 4-arity call in RoomLive's "clip_share" handler binds the sender's NAME as the
-  # GenServer server ({server, from, to, body, opts} = {"clip sharer", buddy, subject,
-  # opts, []}) and crashes in GenServer.whereis/1 — clip sharing is broken in prod too.
-  @tag :skip
+  # Regression: send_dm's 4-arity once bound the sender's name as the GenServer
+  # server (double-default ambiguity) and clip sharing crashed the LiveView.
   test "sharing a clip DMs the buddy and clears the selection", %{conn: conn} do
     uniq = System.unique_integer([:positive])
     body = "share-worthy-#{uniq}"

@@ -92,3 +92,13 @@ config :party_line, :lines, [
 
 # boards posting scheduler on in dev (off by default)
 config :party_line, :scheduler, enabled: true
+
+# atproto OAuth in dev: pin the base to the loopback IP, not "localhost".
+#
+# The loopback client's redirect_uri MUST be 127.0.0.1 (auth servers reject the
+# "localhost" hostname), and the callback correlates the flow through a signed
+# cookie. Browsers treat localhost and 127.0.0.1 as different hosts for
+# cookies, so a base of http://localhost:4000 sets the cookie on one origin and
+# gets redirected to the other — the cookie never comes back and the sign-in
+# dies as "your sign-in expired". Same host everywhere, no mystery.
+config :party_line, :atproto, base_url: "http://127.0.0.1:4000"
