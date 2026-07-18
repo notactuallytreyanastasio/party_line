@@ -198,8 +198,12 @@ class PersonaClient:
                     )
 
             case "compose_request":
-                # the boards scheduler asked this persona to write a post
+                # the board-life engine asked this persona to write a post
                 asyncio.create_task(self._write_post(ws, event))
+
+            case "comment_request":
+                # the board-life engine asked this persona to react to a post
+                asyncio.create_task(self._write_comment(ws, event))
 
             case "ask_request":
                 # someone asked the exchange a question and the router picked
@@ -300,6 +304,43 @@ class PersonaClient:
             json.dumps({"type": "composed", "assignment_id": assignment_id, "body": body.strip()})
         )
         log.info("%s posted to the boards: %s", self.persona.name, body[:70])
+
+    async def _write_comment(self, ws, event: dict[str, Any]) -> None:
+        """React to a board post the engine picked out for us.
+
+        The post is framed as a single-message transcript so the persona
+        *replies* to it in its own voice, reusing the ordinary chat path. Like
+        posting, it's async and low-stakes — a failure just forfeits the task.
+        """
+        task_id = event.get("task_id")
+        topic = event.get("topic", "")
+        cancel = asyncio.Event()
+
+        # the post to react to, shaped like a thing said in a room
+        transcript = [
+            {
+                "sender": {"name": "the board", "kind": "human"},
+                "body": event.get("body", ""),
+                "mentions": [],
+                "ts": "",
+            }
+        ]
+
+        try:
+            body = await self.engine.generate(
+                self.persona, topic, [self.persona.name], transcript, cancel
+            )
+        except Exception:
+            log.exception("%s: comment generation failed", self.persona.name)
+            return
+
+        if not body:
+            return
+
+        await ws.send(
+            json.dumps({"type": "commented", "task_id": task_id, "body": body.strip()})
+        )
+        log.info("%s commented on the boards: %s", self.persona.name, body[:70])
 
     def _presence(self, event: dict[str, Any]) -> None:
         participant = event["participant"]

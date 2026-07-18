@@ -199,6 +199,28 @@ async def test_compose_request_dispatches_and_sends_composed_frame():
 
 
 @pytest.mark.asyncio
+async def test_comment_request_dispatches_and_sends_commented_frame():
+    client = make_client(CannedEngine("  put Herbert on the lease  "))
+    ws = StubWs()
+
+    await client._handle(
+        ws,
+        {
+            "type": "comment_request",
+            "task_id": "c-1",
+            "topic": "sourdough",
+            "post_id": "p-1",
+            "body": "day 40, Herbert thrives",
+        },
+    )
+    deadline = asyncio.get_running_loop().time() + 5
+    while not ws.sent and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
+
+    assert ws.sent == [{"type": "commented", "task_id": "c-1", "body": "put Herbert on the lease"}]
+
+
+@pytest.mark.asyncio
 async def test_ask_request_streams_deltas_then_a_final_answered():
     # zero-delay fake dribbles the answer out word by word
     engine = FakeEngine(min_delay=0.0, max_delay=0.0, seed=1)

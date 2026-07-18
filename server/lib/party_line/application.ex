@@ -28,7 +28,7 @@ defmodule PartyLine.Application do
         {Task.Supervisor, name: PartyLine.TaskSupervisor},
         {PartyLine.Bots, []},
         {PartyLine.Asks, []},
-        {PartyLine.Boards.Scheduler, []},
+        {PartyLine.Boards.Life, []},
         # Soft-state catalog of tailnet-exposed LLM hosts.
         PartyLine.Hosts
       ] ++

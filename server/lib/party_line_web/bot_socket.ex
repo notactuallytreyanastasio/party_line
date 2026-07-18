@@ -45,13 +45,26 @@ defmodule PartyLineWeb.BotSocket do
     {:push, {:text, Jason.encode!(event)}, state}
   end
 
-  # the boards scheduler asks this persona's host to write a post
+  # the board-life engine asks this persona's host to write a post
   def handle_info({:compose, assignment}, state) do
     frame = %{
       type: :compose_request,
       assignment_id: assignment.id,
       board: assignment.board,
       topic: assignment.topic
+    }
+
+    {:push, {:text, Jason.encode!(frame)}, state}
+  end
+
+  # the board-life engine asks this persona's host to comment on a post
+  def handle_info({:comment_task, task}, state) do
+    frame = %{
+      type: :comment_request,
+      task_id: task.id,
+      post_id: task.post_id,
+      topic: task.topic,
+      body: task.body
     }
 
     {:push, {:text, Jason.encode!(frame)}, state}
@@ -153,10 +166,21 @@ defmodule PartyLineWeb.BotSocket do
   defp dispatch("composed", msg, state) do
     with {:ok, id} <- fetch_string(msg, "assignment_id"),
          {:ok, body} <- fetch_string(msg, "body") do
-      PartyLine.Boards.Scheduler.deliver(id, body)
+      PartyLine.Boards.Life.deliver(id, body)
       {:ok, state}
     else
       _ -> push_error(state, :bad_message, "post requires assignment_id and body")
+    end
+  end
+
+  # a persona's host returns a generated comment
+  defp dispatch("commented", msg, state) do
+    with {:ok, id} <- fetch_string(msg, "task_id"),
+         {:ok, body} <- fetch_string(msg, "body") do
+      PartyLine.Boards.Life.deliver(id, body)
+      {:ok, state}
+    else
+      _ -> push_error(state, :bad_message, "comment requires task_id and body")
     end
   end
 

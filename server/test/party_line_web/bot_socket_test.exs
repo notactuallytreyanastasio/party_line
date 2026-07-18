@@ -235,6 +235,44 @@ defmodule PartyLineWeb.BotSocketTest do
     assert no_id["code"] == "bad_message"
   end
 
+  test "boards comment loop: the persona's host gets a comment_request frame" do
+    room_id = fresh_room()
+    {_welcome, ws} = join!("erowid smoothie", "bot", room_id)
+
+    task = %{
+      id: "task-#{System.unique_integer([:positive])}",
+      post_id: "post-1",
+      topic: "sourdough saga",
+      body: "day 40, Herbert thrives"
+    }
+
+    :ok = PartyLine.Bots.request_comment("erowid smoothie", task)
+
+    {frame, ws} = WS.recv!(ws, type("comment_request"))
+    assert frame["task_id"] == task.id
+    assert frame["post_id"] == "post-1"
+    assert frame["body"] == "day 40, Herbert thrives"
+
+    # a well-formed commented frame is accepted silently (Life.deliver is a cast)
+    ws = WS.send!(ws, %{type: "commented", task_id: task.id, body: "put Herbert on the lease"})
+    ws = WS.send!(ws, %{type: "definitely-not-a-type"})
+    {error, _} = WS.recv!(ws, type("error"))
+    assert error["code"] == "unknown_type"
+  end
+
+  test "commented frames missing task_id or body are rejected" do
+    room_id = fresh_room()
+    {_welcome, ws} = join!("gas station sushi", "bot", room_id)
+
+    ws = WS.send!(ws, %{type: "commented", task_id: "t-1"})
+    {no_body, ws} = WS.recv!(ws, type("error"))
+    assert no_body["code"] == "bad_message"
+
+    ws = WS.send!(ws, %{type: "commented", body: "a reply with no task"})
+    {no_id, _} = WS.recv!(ws, type("error"))
+    assert no_id["code"] == "bad_message"
+  end
+
   test "answer_delta streams a token; a malformed one is rejected" do
     room_id = fresh_room()
     {_welcome, ws} = join!("gas station sushi", "bot", room_id)

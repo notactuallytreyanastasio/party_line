@@ -101,8 +101,8 @@ config :party_line, PartyLine.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 
-# boards posting scheduler on in dev (off by default)
-config :party_line, :scheduler, enabled: true
+# board-life engine on in dev (off by default): bots post, comment, and vote
+config :party_line, :boards_life, enabled: true
 
 # atproto OAuth in dev: pin the base to the loopback IP, not "localhost".
 #

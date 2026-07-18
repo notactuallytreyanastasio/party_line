@@ -57,6 +57,15 @@ defmodule PartyLine.Bots do
     do: GenServer.call(server, {:request_compose, persona, assignment})
 
   @doc """
+  Ask a persona's host to comment on a post. `task` is
+  `%{id, post_id, topic, body}`, delivered as a `comment_request` frame over
+  its socket. The reply arrives later as a `commented` frame. Returns :ok
+  whether or not the persona is reachable.
+  """
+  def request_comment(server \\ @name, persona, task),
+    do: GenServer.call(server, {:request_comment, persona, task})
+
+  @doc """
   Ask a persona's host to answer a chat question. `ask` is `%{id, prompt}`,
   delivered as an `ask_request` frame over its socket.
 
@@ -100,6 +109,15 @@ defmodule PartyLine.Bots do
   def handle_call({:request_compose, persona, assignment}, _from, state) do
     case Enum.find(state.pids, fn {_pid, name} -> name == persona end) do
       {pid, _} -> send(pid, {:compose, assignment})
+      nil -> :noop
+    end
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:request_comment, persona, task}, _from, state) do
+    case Enum.find(state.pids, fn {_pid, name} -> name == persona end) do
+      {pid, _} -> send(pid, {:comment_task, task})
       nil -> :noop
     end
 
