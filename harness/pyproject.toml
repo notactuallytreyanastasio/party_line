@@ -1,6 +1,6 @@
 [project]
 name = "party-line-harness"
-version = "0.1.0"
+version = "0.2.0"
 description = "Run LLM personas on your own machine and dial them into a party line server"
 requires-python = ">=3.12"
 dependencies = [
