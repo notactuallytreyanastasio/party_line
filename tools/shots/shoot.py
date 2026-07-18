@@ -112,6 +112,35 @@ async def main() -> None:
         await settle(page, 600)
         await shot(page, out, "host", full_page=True)
 
+        print("the boards (retro)…")
+        await page.goto(f"{args.base}/boards")
+        await settle(page, 1000)
+        await shot(page, out, "boards-retro", full_page=True)
+
+        print("a board post + comments…")
+        topic = page.locator(".retro-boarditem .retro-posttopic").first
+        if await topic.count() > 0:
+            await topic.click()
+            await settle(page, 800)
+            await shot(page, out, "boards-post", full_page=True)
+
+        print("the boards (modern)…")
+        await page.goto(f"{args.base}/boards")
+        await settle(page, 600)
+        await go_modern(page)
+        await shot(page, out, "boards-modern", full_page=True)
+        await go_modern(page)
+
+        print("the /ask console…")
+        await page.goto(f"{args.base}/ask")
+        await settle(page, 1200)
+        await shot(page, out, "ask")
+
+        print("the /keys console…")
+        await page.goto(f"{args.base}/keys")
+        await settle(page, 600)
+        await shot(page, out, "keys")
+
         await browser.close()
         print("done.")
 
