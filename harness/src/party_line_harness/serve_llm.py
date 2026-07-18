@@ -3,14 +3,17 @@
 A little piece of code someone runs to host their own model for the
 exchange. It:
 
-  * serves a tiny HTTP endpoint (``POST /v1/generate``, ``GET /healthz``)
-    that runs the local engine behind a bearer token;
+  * serves OpenAI-shaped inference (``POST /v1/chat/completions``) plus the
+    party-line persona endpoint (``POST /v1/generate``) and ``GET /healthz``,
+    all behind one secret;
   * exposes that endpoint on the tailnet with ``tailscale serve`` (or the
     whole internet with ``--funnel``), falling back to localhost-only if
     tailscale isn't around;
-  * registers a catalog entry with the party-line server and heartbeats
-    it, so the room can list the host — WITHOUT ever handing the server
-    the bearer token (token distribution is out-of-band, host to friends).
+  * registers with the party-line exchange and heartbeats — handing it the
+    secret so the exchange, and ONLY the exchange, can reach us. Public
+    callers authenticate to the exchange (an atproto-bound key) and it proxies
+    to us; a direct hit from the open internet has no secret and gets 401.
+    This is the point of ``--funnel``: reachable, but never open.
 
 Everything is best-effort around the edges: an unreachable catalog, a
 missing tailscale binary, a flaky heartbeat — none of these crash the
@@ -117,6 +120,21 @@ class LlmHost:
             persona, topic, roster, transcript, cancel, memories=memories
         )
 
+    def chat(self, payload: Any) -> str:
+        """Run one OpenAI-style completion for a /v1/chat/completions body.
+        Raises ValueError on a malformed body."""
+        if not isinstance(payload, dict):
+            raise ValueError("body must be a JSON object")
+        messages = payload.get("messages")
+        if not isinstance(messages, list) or not messages:
+            raise ValueError("messages must be a non-empty array")
+        max_tokens = payload.get("max_tokens") or 512
+        temperature = payload.get("temperature", 0.7)
+        return self._submit(self._chat(_norm_messages(messages), max_tokens, temperature))
+
+    async def _chat(self, messages: list[dict[str, str]], max_tokens: int, temperature: float) -> str:
+        return await self.engine.chat(messages, max_tokens=max_tokens, temperature=temperature)
+
     def close(self) -> None:
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=5)
@@ -157,8 +175,15 @@ def make_handler(host: LlmHost) -> type[BaseHTTPRequestHandler]:
                 self._send(404, {"error": "not found"})
 
         def do_POST(self):
-            if self.path != "/v1/generate":
-                return self._send(404, {"error": "not found"})
+            # both inference routes require the secret — the exchange holds it,
+            # so a direct hit from the open internet gets 401, funneled or not.
+            if self.path == "/v1/generate":
+                return self._run(lambda p: {"text": host.generate(p)})
+            if self.path == "/v1/chat/completions":
+                return self._run(lambda p: _openai_completion(host.chat(p), host.model_id))
+            self._send(404, {"error": "not found"})
+
+        def _run(self, work):
             if not self._authed():
                 return self._send(401, {"error": "unauthorized"})
             try:
@@ -166,15 +191,48 @@ def make_handler(host: LlmHost) -> type[BaseHTTPRequestHandler]:
             except (json.JSONDecodeError, ValueError):
                 return self._send(400, {"error": "malformed json"})
             try:
-                text = host.generate(payload)
+                self._send(200, work(payload))
             except ValueError as exc:
-                return self._send(400, {"error": str(exc)})
+                self._send(400, {"error": str(exc)})
             except Exception:
-                log.exception("generation failed")
-                return self._send(500, {"error": "generation failed"})
-            self._send(200, {"text": text})
+                log.exception("inference failed")
+                self._send(500, {"error": "inference failed"})
 
     return Handler
+
+
+def _norm_messages(messages: list[Any]) -> list[dict[str, str]]:
+    """Flatten OpenAI messages to `{role, content:str}` — content may arrive as
+    a string or an array of typed parts; we keep the text."""
+    out = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content", "")
+        if isinstance(content, list):
+            content = "\n".join(
+                p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
+            )
+        out.append({"role": m.get("role", "user"), "content": content or ""})
+    return out
+
+
+def _openai_completion(text: str, model: str) -> dict:
+    import time as _time
+
+    return {
+        "id": "chatcmpl-" + secrets.token_urlsafe(12),
+        "object": "chat.completion",
+        "created": int(_time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": text or ""},
+                "finish_reason": "stop",
+            }
+        ],
+    }
 
 
 def make_server(host: LlmHost, bind: str = "127.0.0.1", port: int = DEFAULT_LLM_PORT) -> ThreadingHTTPServer:
@@ -185,7 +243,14 @@ def make_server(host: LlmHost, bind: str = "127.0.0.1", port: int = DEFAULT_LLM_
 
 
 class Catalog:
-    """The party-line server's host registry. Never sees the bearer token."""
+    """The party-line server's host registry.
+
+    We register the *secret* the exchange must present to reach us — the
+    exchange becomes the sole authorized caller and proxies requests to us on
+    an atproto-authenticated user's behalf, so our endpoint never faces the
+    open internet directly. The secret goes only to the exchange, over the
+    registration call, and nowhere else.
+    """
 
     def __init__(
         self,
@@ -194,14 +259,14 @@ class Catalog:
         url: str,
         model: str,
         *,
-        requires_token: bool = True,
+        secret: str | None = None,
         timeout: float = 10.0,
     ):
         self.server_url = server_url.rstrip("/")
         self.name = name
         self.url = url
         self.model = model
-        self.requires_token = requires_token
+        self.secret = secret
         self.timeout = timeout
         self.host_id: Any = None
         self.ttl_seconds: int = 60
@@ -211,7 +276,7 @@ class Catalog:
             "name": self.name,
             "url": self.url,
             "model": self.model,
-            "requires_token": self.requires_token,
+            "secret": self.secret,
         }
         try:
             resp = httpx.post(
@@ -410,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     log.info("public URL: %s", public_url)
 
-    catalog = Catalog(args.server, args.name, public_url, model_id, requires_token=True)
+    catalog = Catalog(args.server, args.name, public_url, model_id, secret=token)
     catalog.register()  # if it fails, the heartbeat loop keeps retrying
 
     stop = threading.Event()

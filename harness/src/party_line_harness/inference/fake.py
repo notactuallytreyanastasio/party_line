@@ -92,3 +92,16 @@ class FakeEngine:
                 on_delta(word)
 
         return body
+
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        _ = (max_tokens, temperature)
+        last = next(
+            (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), ""
+        )
+        return f"ok, about \"{last[:100]}\" — I have opinions."

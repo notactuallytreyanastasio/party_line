@@ -11,7 +11,9 @@ defmodule PartyLineWeb.HostControllerTest do
   }
 
   setup do
-    on_exit(fn -> Enum.each(PartyLine.Hosts.list(), &PartyLine.Hosts.deregister(&1.id)) end)
+    # the public list no longer carries the catalog id (you can't deregister a
+    # stranger's host), so clear the whole catalog between tests instead
+    on_exit(fn -> PartyLine.Hosts.clear() end)
     :ok
   end
 
@@ -36,17 +38,19 @@ defmodule PartyLineWeb.HostControllerTest do
     assert error =~ "url"
   end
 
-  test "index lists cataloged hosts without leaking the id", %{conn: conn} do
+  test "index lists cataloged hosts without leaking url, secret, or id", %{conn: conn} do
     register!(conn)
 
     conn = get(conn, ~p"/api/hosts")
     assert %{"ok" => true, "data" => %{"hosts" => [host]}} = json_response(conn, 200)
 
     assert host["name"] == "gpu-closet"
-    assert host["url"] == @valid["url"]
     assert host["model"] == "qwen2.5-coder-7b"
-    assert host["requires_token"] == true
     assert is_binary(host["last_seen_at"])
+
+    # a lent model is reached through the exchange, so none of this leaks
+    refute Map.has_key?(host, "url")
+    refute Map.has_key?(host, "secret")
     refute Map.has_key?(host, "id")
   end
 

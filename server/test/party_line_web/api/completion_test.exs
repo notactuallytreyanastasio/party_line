@@ -11,6 +11,30 @@ defmodule PartyLineWeb.CompletionTest do
 
   @did "did:plc:testcaller"
 
+  # stands in for the HTTP hop to a lent host — proves the request was proxied
+  # with the host's identity, without a real socket
+  defmodule FakeHostProxy do
+    @behaviour PartyLine.API.HostProxy.Behaviour
+
+    @impl true
+    def chat(host, body) do
+      [%{"content" => prompt}] = Enum.take(body["messages"], -1)
+
+      {:ok,
+       %{
+         "object" => "chat.completion",
+         "model" => host.model,
+         "choices" => [
+           %{
+             "index" => 0,
+             "message" => %{"role" => "assistant", "content" => "proxied<#{prompt}>"},
+             "finish_reason" => "stop"
+           }
+         ]
+       }}
+    end
+  end
+
   setup do
     %{asks: asks, bots: bots} =
       ExchangeFake.start!(
@@ -206,6 +230,85 @@ defmodule PartyLineWeb.CompletionTest do
       assert [%{"type" => "text", "text" => text}] = body["content"]
       assert text =~ "answered:"
       assert body["stop_reason"] == "end_turn"
+    end
+  end
+
+  describe "proxying a lent model (exchange-gated)" do
+    setup %{token: token} do
+      {:ok, hosts} = PartyLine.Hosts.start_link(name: nil)
+
+      {:ok, _} =
+        PartyLine.Hosts.register(hosts, %{
+          name: "gpu-closet",
+          url: "http://gpu-closet.ts.net:8377",
+          model: "qwen-7b",
+          secret: "sk-host"
+        })
+
+      Application.put_env(:party_line, :api_hosts, hosts)
+      Application.put_env(:party_line, :api_host_proxy, FakeHostProxy)
+
+      on_exit(fn ->
+        Application.delete_env(:party_line, :api_hosts)
+        Application.delete_env(:party_line, :api_host_proxy)
+      end)
+
+      %{token: token}
+    end
+
+    test "a request for a lent model is proxied to its host, attributed", %{
+      conn: conn,
+      token: token
+    } do
+      body =
+        conn
+        |> authed(token)
+        |> post_json("/v1/chat/completions", %{
+          model: "qwen-7b",
+          messages: [%{role: "user", content: "hello host"}]
+        })
+        |> json_response(200)
+
+      assert body["object"] == "chat.completion"
+      assert [%{"message" => %{"content" => "proxied<hello host>"}}] = body["choices"]
+      assert body["party_line"]["proxied_via"] == "exchange"
+      assert body["party_line"]["host"] == "gpu-closet"
+    end
+
+    test "streaming a lent model re-emits the answer as SSE", %{conn: conn, token: token} do
+      conn =
+        conn
+        |> authed(token)
+        |> post_json("/v1/chat/completions", %{
+          model: "qwen-7b",
+          stream: true,
+          messages: [%{role: "user", content: "stream host"}]
+        })
+
+      assert conn.status == 200
+      assert conn.resp_body =~ "data: [DONE]"
+      assert conn.resp_body =~ "stream host"
+    end
+
+    test "GET /v1/models lists the lent model alongside personas", %{conn: conn, token: token} do
+      body = conn |> authed(token) |> get("/v1/models") |> json_response(200)
+      lent = Enum.find(body["data"], &(&1["id"] == "qwen-7b"))
+      assert lent["owned_by"] == "lent"
+      assert lent["party_line"]["host"] == "gpu-closet"
+    end
+
+    test "an unknown model still falls through to the persona path", %{conn: conn, token: token} do
+      body =
+        conn
+        |> authed(token)
+        |> post_json("/v1/chat/completions", %{
+          model: "party-line-auto",
+          messages: [%{role: "user", content: "who's home"}]
+        })
+        |> json_response(200)
+
+      # answered by the fake persona exchange, not the host proxy
+      assert body["party_line"]["persona"] == "Horse Dentist"
     end
   end
 

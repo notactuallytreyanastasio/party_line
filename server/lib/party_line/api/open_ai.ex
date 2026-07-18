@@ -96,9 +96,14 @@ defmodule PartyLine.API.OpenAI do
   non-streaming host, or a test).
   """
   @spec stream_frames(Chat.result(), String.t() | nil) :: [String.t()]
-  def stream_frames(result, requested_model) do
-    ctx = stream_ctx(model_label(result, requested_model))
-    deltas = result.content |> chunk_text() |> Enum.map(&stream_delta(ctx, &1))
+  def stream_frames(result, requested_model),
+    do: stream_frames_for(result.content, model_label(result, requested_model))
+
+  @doc "All SSE frames for a bare `content` string under `model` — used by the host proxy."
+  @spec stream_frames_for(String.t(), String.t()) :: [String.t()]
+  def stream_frames_for(content, model) do
+    ctx = stream_ctx(model)
+    deltas = content |> chunk_text() |> Enum.map(&stream_delta(ctx, &1))
     [stream_start(ctx)] ++ deltas ++ [stream_stop(ctx), stream_done()]
   end
 

@@ -1,9 +1,10 @@
 defmodule PartyLineWeb.ModelsController do
   @moduledoc """
-  `GET /v1/models` — who's answerable right now. Each online persona is a
-  model id you can target in the `model` field; `party-line-auto` lets the
-  router pick. The list is live: it's whoever's leased a machine to the
-  exchange this second, so it shrinks when laptops close.
+  `GET /v1/models` — what's answerable right now. Each online persona is a model
+  id you can target in the `model` field; each **lent** model (a neighbor's
+  `serve-llm`, reached through the exchange proxy) is another; and
+  `party-line-auto` lets the router pick a persona. The list is live — it
+  shrinks when laptops close.
   """
   use PartyLineWeb, :controller
 
@@ -12,7 +13,7 @@ defmodule PartyLineWeb.ModelsController do
   def index(conn, _params) do
     created = System.system_time(:second)
 
-    online =
+    personas =
       bots_server()
       |> PartyLine.Bots.cards()
       |> Enum.map(fn card ->
@@ -21,7 +22,21 @@ defmodule PartyLineWeb.ModelsController do
           object: "model",
           created: created,
           owned_by: "party-line",
-          party_line: %{model: card.model, byline: Card.byline(card)}
+          party_line: %{kind: "persona", model: card.model, byline: Card.byline(card)}
+        }
+      end)
+
+    lent =
+      hosts_server()
+      |> PartyLine.Hosts.list()
+      |> Enum.filter(& &1.served)
+      |> Enum.map(fn host ->
+        %{
+          id: host.model,
+          object: "model",
+          created: created,
+          owned_by: "lent",
+          party_line: %{kind: "lent", host: host.name}
         }
       end)
 
@@ -30,14 +45,12 @@ defmodule PartyLineWeb.ModelsController do
       object: "model",
       created: created,
       owned_by: "party-line",
-      party_line: %{
-        model: "router picks by size and availability",
-        byline: "the exchange, routed"
-      }
+      party_line: %{kind: "router", byline: "the exchange, routed"}
     }
 
-    json(conn, %{object: "list", data: [auto | online]})
+    json(conn, %{object: "list", data: [auto | personas] ++ lent})
   end
 
   defp bots_server, do: Application.get_env(:party_line, :api_bots, PartyLine.Bots)
+  defp hosts_server, do: Application.get_env(:party_line, :api_hosts, PartyLine.Hosts)
 end

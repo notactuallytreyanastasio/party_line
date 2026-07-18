@@ -46,9 +46,24 @@ defmodule PartyLine.Hosts do
   def deregister(server \\ __MODULE__, id),
     do: GenServer.call(server, {:deregister, id})
 
-  @doc "Live catalog entries (last heartbeat within TTL)."
+  @doc "Test/dev only: drop every cataloged host."
+  def clear(server \\ __MODULE__), do: GenServer.call(server, :clear)
+
+  @doc "Live catalog entries (last heartbeat within TTL), public projection only."
   def list(server \\ __MODULE__),
     do: GenServer.call(server, :list)
+
+  @doc """
+  Resolve a live, proxyable host by its model id or name (case-insensitive) to
+  the private `%{name, model, url, secret}` the exchange needs to reach it.
+  `nil` if there's no live host by that handle, or it registered no secret.
+
+  This is the ONLY place the private url + secret leave the catalog, and it's
+  server-internal — never a controller projection. Callers reach a lent model
+  *through* the exchange, never by its url.
+  """
+  def served(server \\ __MODULE__, handle),
+    do: GenServer.call(server, {:served, handle})
 
   @doc "Number of live catalog entries."
   def count(server \\ __MODULE__),
@@ -99,12 +114,32 @@ defmodule PartyLine.Hosts do
     {:reply, :ok, update_in(state.hosts, &Map.delete(&1, id))}
   end
 
+  def handle_call(:clear, _from, state) do
+    {:reply, :ok, %{state | hosts: %{}}}
+  end
+
   def handle_call(:list, _from, state) do
     {:reply, live_entries(state), state}
   end
 
   def handle_call(:count, _from, state) do
     {:reply, length(live_entries(state)), state}
+  end
+
+  def handle_call({:served, handle}, _from, state) do
+    down = handle |> to_string() |> String.downcase()
+    cutoff = now() - state.ttl
+
+    entry =
+      state.hosts
+      |> Map.values()
+      |> Enum.filter(&(&1.mono >= cutoff and is_binary(&1[:secret])))
+      |> Enum.find(fn e ->
+        String.downcase(e.model) == down or String.downcase(e.name) == down
+      end)
+
+    reply = entry && Map.take(entry, [:name, :model, :url, :secret])
+    {:reply, reply, state}
   end
 
   @impl true
@@ -127,18 +162,36 @@ defmodule PartyLine.Hosts do
     |> Enum.map(&public/1)
   end
 
+  # The public projection: what a caller may see. Never the url or secret —
+  # a lent model is reached through the exchange, so its address stays private.
+  # `served` says it registered a secret and can be proxied.
   defp public(e),
-    do: Map.take(e, [:id, :name, :url, :model, :requires_token, :last_seen_at])
+    do: %{
+      name: e.name,
+      model: e.model,
+      last_seen_at: e.last_seen_at,
+      served: is_binary(e[:secret])
+    }
 
   defp validate(attrs) do
     with {:ok, name} <- validate_name(fetch(attrs, :name)),
          {:ok, url} <- validate_url(fetch(attrs, :url)),
          {:ok, model} <- validate_model(fetch(attrs, :model)) do
-      requires_token = truthy(fetch(attrs, :requires_token))
-
-      {:ok, %{name: name, url: url, model: model, requires_token: requires_token}}
+      {:ok, %{name: name, url: url, model: model, secret: validate_secret(fetch(attrs, :secret))}}
     end
   end
+
+  # The secret the exchange presents to the host to prove it's the allowed
+  # caller. Optional at the catalog layer (a host may list without lending),
+  # but only a host that registers one is proxyable.
+  defp validate_secret(s) when is_binary(s) do
+    case String.trim(s) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp validate_secret(_), do: nil
 
   defp validate_name(name) when is_binary(name) do
     trimmed = String.trim(name)
@@ -167,10 +220,6 @@ defmodule PartyLine.Hosts do
       :error -> Map.get(attrs, Atom.to_string(key))
     end
   end
-
-  defp truthy(true), do: true
-  defp truthy("true"), do: true
-  defp truthy(_), do: false
 
   defp gen_id, do: Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
 

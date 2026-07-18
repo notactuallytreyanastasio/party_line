@@ -45,11 +45,8 @@ defmodule PartyLineWeb.HostController do
   end
 
   def index(conn, _params) do
-    hosts = Enum.map(Hosts.list(), &public/1)
-    json(conn, %{ok: true, data: %{hosts: hosts}})
+    # `Hosts.list/0` is already the public projection — no url, no secret. A
+    # lent model is reached through the exchange's /v1, never by its address.
+    json(conn, %{ok: true, data: %{hosts: Hosts.list()}})
   end
-
-  # Strip the internal id; expose only what a caller needs.
-  defp public(h),
-    do: Map.take(h, [:name, :url, :model, :requires_token, :last_seen_at])
 end

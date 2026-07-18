@@ -33,15 +33,17 @@ defmodule PartyLineWeb.HostLiveTest do
         name: "test exchange",
         url: "https://mochi.tail1234.ts.net",
         model: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
-        requires_token: true
+        secret: "sk-test"
       })
 
     {:ok, _view, html} = live(conn, "/host")
     assert html =~ "currently on the exchange"
     assert html =~ "test exchange"
-    assert html =~ "mochi.tail1234.ts.net"
-    # never leak more than name/model/host
-    refute html =~ "requires_token"
+    assert html =~ "Meta-Llama-3.1-8B-Instruct-4bit"
+    assert html =~ "lent"
+    # the host's address never leaks — you reach a lent model through /v1
+    refute html =~ "mochi.tail1234.ts.net"
+    refute html =~ "sk-test"
     :ok = PartyLine.Hosts.deregister(id)
   end
 end

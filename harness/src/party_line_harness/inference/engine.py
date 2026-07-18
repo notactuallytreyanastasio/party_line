@@ -89,6 +89,19 @@ class Engine(Protocol):
         """
         ...
 
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        """Bare OpenAI-style completion over `messages` — no persona, no
+        prime directive. This is what `serve-llm` exposes to the exchange for
+        proxied `/v1/chat/completions`; the persona voice lives in `generate`.
+        """
+        ...
+
 
 class MlxEngine:
     def __init__(self, model_id: str = DEFAULT_MODEL):
@@ -202,6 +215,29 @@ class MlxEngine:
         if not raw:
             return None
         return tr.postprocess(raw, persona.name, roster_names)
+
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        if self._model is None:
+            raise RuntimeError("call warmup() before chat()")
+
+        async with self._lock:
+            raw, _ = await asyncio.to_thread(
+                self._generate_sync,
+                messages,
+                stops=[],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                cancel_check=lambda: False,
+            )
+
+        # extract the visible channel for thinking models; no persona postprocess
+        return extract_channel_final(raw)
 
     @staticmethod
     def _merge_system_into_user(messages: list[dict[str, str]]) -> list[dict[str, str]]:

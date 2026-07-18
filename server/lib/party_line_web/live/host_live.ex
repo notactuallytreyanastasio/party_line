@@ -124,7 +124,7 @@ defmodule PartyLineWeb.HostLive do
 
           <div :if={@llm_hosts != []}>
             <p class="retro-panel-title">currently on the exchange</p>
-            <pre class="retro-terminal"><code :for={host <- @llm_hosts}>{host.name} — {host.model} — {URI.parse(host.url).host || host.url}
+            <pre class="retro-terminal"><code :for={host <- @llm_hosts}>{host.name} — {host.model}{if host.served, do: " — lent (reach it at /v1)", else: ""}
     </code></pre>
           </div>
 

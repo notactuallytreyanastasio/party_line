@@ -67,6 +67,38 @@ class RemoteEngine:
             return None
         return text
 
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.7,
+    ) -> str:
+        payload = {
+            "model": "remote",
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        return await asyncio.to_thread(self._post_chat, payload)
+
+    def _post_chat(self, payload: dict[str, Any]) -> str:
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        try:
+            resp = httpx.post(
+                f"{self.base_url}/v1/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+        except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+            log.warning("remote chat %s failed: %s", self.base_url, exc)
+            return ""
+
     def _post(self, payload: dict[str, Any]) -> str | None:
         headers = {}
         if self.token:

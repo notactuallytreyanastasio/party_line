@@ -9,7 +9,8 @@ defmodule PartyLine.HostsTest do
     name: "gpu-closet",
     url: "http://gpu-closet.tailnet.ts.net:8080",
     model: "qwen2.5-coder-7b",
-    requires_token: true
+    requires_token: true,
+    secret: "sk-host-secret"
   }
 
   defp start(opts \\ []) do
@@ -31,12 +32,38 @@ defmodule PartyLine.HostsTest do
 
     assert Hosts.count(h) == 1
     assert [entry] = Hosts.list(h)
-    assert entry.id == id
     assert entry.name == "gpu-closet"
-    assert entry.url == @valid.url
     assert entry.model == "qwen2.5-coder-7b"
-    assert entry.requires_token == true
+    assert entry.served == true
     assert %DateTime{} = entry.last_seen_at
+
+    # the public projection never leaks how to reach the host directly
+    refute Map.has_key?(entry, :url)
+    refute Map.has_key?(entry, :secret)
+    refute Map.has_key?(entry, :id)
+    _ = id
+  end
+
+  test "served/2 resolves a proxyable host by model or name to its private url + secret" do
+    h = start()
+    {:ok, _} = Hosts.register(h, @valid)
+
+    assert %{url: url, secret: "sk-host-secret", model: "qwen2.5-coder-7b", name: "gpu-closet"} =
+             Hosts.served(h, "qwen2.5-coder-7b")
+
+    assert url == @valid.url
+    # by name too, case-insensitive
+    assert %{secret: "sk-host-secret"} = Hosts.served(h, "GPU-CLOSET")
+    # unknown handle → nil
+    assert Hosts.served(h, "no-such-model") == nil
+  end
+
+  test "a host that registered no secret is listed but not proxyable" do
+    h = start()
+    {:ok, _} = Hosts.register(h, Map.delete(@valid, :secret))
+
+    assert [%{served: false}] = Hosts.list(h)
+    assert Hosts.served(h, "qwen2.5-coder-7b") == nil
   end
 
   test "heartbeat keeps an entry alive past the TTL" do
@@ -111,36 +138,27 @@ defmodule PartyLine.HostsTest do
       assert [%{name: "edge-box", model: "llama3"}] = Hosts.list(h)
     end
 
-    test "requires_token defaults to false when absent" do
+    test "a blank or absent secret registers as not-served" do
       h = start()
-      {:ok, _} = Hosts.register(h, Map.delete(@valid, :requires_token))
-      assert [%{requires_token: false}] = Hosts.list(h)
+      {:ok, _} = Hosts.register(h, %{@valid | name: "a", secret: "   "})
+      {:ok, _} = Hosts.register(h, %{@valid | name: "b", secret: nil})
+      {:ok, _} = Hosts.register(h, %{@valid | name: "c"} |> Map.delete(:secret))
+      assert Enum.all?(Hosts.list(h), &(&1.served == false))
     end
 
-    test "accepts a fully string-keyed attrs map (the JSON params path)" do
+    test "accepts a fully string-keyed attrs map (the JSON params path), secret and all" do
       h = start(ttl: 60_000)
 
       attrs = %{
         "name" => "gpu-closet",
         "url" => "http://gpu-closet.tailnet.ts.net:8080",
         "model" => "qwen2.5-coder-7b",
-        "requires_token" => "true"
+        "secret" => "sk-from-json"
       }
 
       assert {:ok, %{id: _}} = Hosts.register(h, attrs)
-      assert [%{name: "gpu-closet", requires_token: true}] = Hosts.list(h)
-    end
-
-    test "requires_token is false for any value other than true" do
-      h = start(ttl: 60_000)
-
-      {:ok, _} = Hosts.register(h, %{@valid | name: "a", requires_token: false})
-      {:ok, _} = Hosts.register(h, %{@valid | name: "b", requires_token: "false"})
-      {:ok, _} = Hosts.register(h, %{@valid | name: "c", requires_token: 1})
-
-      hosts = Hosts.list(h)
-      assert Enum.map(hosts, & &1.name) == ["a", "b", "c"]
-      assert Enum.all?(hosts, &(&1.requires_token == false))
+      assert [%{name: "gpu-closet", served: true}] = Hosts.list(h)
+      assert %{secret: "sk-from-json"} = Hosts.served(h, "gpu-closet")
     end
 
     test "rejects a non-binary name and a non-binary model" do

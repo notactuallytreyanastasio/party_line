@@ -130,10 +130,39 @@ def test_generate_non_object_body_is_400(daemon):
     assert resp.json() == {"error": "body must be a JSON object"}
 
 
+def test_chat_completions_returns_an_openai_completion(daemon):
+    resp = httpx.post(
+        f"{daemon}/v1/chat/completions",
+        json={"model": "whatever", "messages": [{"role": "user", "content": "why do cats knead?"}]},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object"] == "chat.completion"
+    assert data["choices"][0]["message"]["role"] == "assistant"
+    assert "cats knead" in data["choices"][0]["message"]["content"]
+
+
+def test_chat_completions_requires_the_secret(daemon):
+    # a direct hit without the secret is refused — the exchange holds it
+    resp = httpx.post(
+        f"{daemon}/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 401
+
+
+def test_chat_completions_empty_messages_is_400(daemon):
+    resp = httpx.post(
+        f"{daemon}/v1/chat/completions", json={"messages": []}, headers=_auth()
+    )
+    assert resp.status_code == 400
+
+
 def test_generate_engine_failure_is_500(raising_daemon):
     resp = httpx.post(f"{raising_daemon}/v1/generate", json=_payload(), headers=_auth())
     assert resp.status_code == 500
-    assert resp.json() == {"error": "generation failed"}
+    assert resp.json() == {"error": "inference failed"}
 
 
 def test_unknown_post_path_is_404_regardless_of_auth(daemon):
@@ -211,7 +240,7 @@ def catalog_stub():
 
 def test_catalog_register_heartbeat_deregister_sequence(catalog_stub):
     cat = serve_llm.Catalog(
-        catalog_stub, name="rig-7", url="https://rig-7.ts.net", model="fake"
+        catalog_stub, name="rig-7", url="https://rig-7.ts.net", model="fake", secret="sk-rig"
     )
 
     assert cat.register() is True
@@ -228,15 +257,15 @@ def test_catalog_register_heartbeat_deregister_sequence(catalog_stub):
         ("POST", "/api/hosts/host-42/heartbeat"),
         ("DELETE", "/api/hosts/host-42"),
     ]
-    # the token is NEVER shipped to the catalog — only url/name/model
+    # the inversion: the secret IS shipped to the exchange (and only there), so
+    # the exchange can proxy to us as the sole authorized caller
     reg = calls[0]["body"]
     assert reg == {
         "name": "rig-7",
         "url": "https://rig-7.ts.net",
         "model": "fake",
-        "requires_token": True,
+        "secret": "sk-rig",
     }
-    assert "token" not in reg
 
 
 def test_catalog_heartbeat_reregisters_when_unregistered(catalog_stub):
