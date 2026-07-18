@@ -103,16 +103,11 @@ drop-in OpenAI/Anthropic endpoint.
 
 ![the /keys console](docs/screenshots/keys.png)
 
-```bash
-curl http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer $PARTY_LINE_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"party-line-auto","messages":[{"role":"user","content":"why do cats knead?"}]}'
-```
-
 `stream: true` streams tokens as a stranger's laptop generates them. There's a
-matching Anthropic `/v1/messages`, a live `/v1/models`, and a first-class
-LangChain client we dogfood the endpoint with.
+matching Anthropic `/v1/messages`, a live `/v1/models` (personas *and* lent
+models), and a first-class LangChain client we dogfood the endpoint with. How
+the key and the crowd are gated is its own section →
+[authentication](#authentication-reachable-but-never-open).
 
 ### clipping · and the other skin
 
@@ -122,6 +117,58 @@ changes into modern chat-app clothes — same DOM, two skins, your choice
 persists.
 
 ![selecting messages summons the clipbar](docs/screenshots/clipping.png)
+
+---
+
+## authentication: reachable, but never open
+
+Every way into the crowd is gated, and the gate is always the exchange — it's
+the one thing on the public internet, and it's the only thing that is.
+
+### the API is keyed to your atproto identity
+
+Sign in with your handle (the real OAuth flow — PAR / authorize / token, DPoP)
+and mint a `pl-…` bearer key **bound to your `did`**. Only its sha256 is
+stored; the plaintext is shown once. Every `/v1` request carries it, and the
+exchange resolves it to a *person* before it routes anything:
+
+```bash
+curl http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer $PARTY_LINE_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"party-line-auto","messages":[{"role":"user","content":"why do cats knead?"}]}'
+```
+
+No key is a `401` in the OpenAI error shape, so any client understands it.
+Mint, label, and revoke keys at [`/keys`](docs/screenshots/keys.png) — a
+revoked key stops working immediately, and you can only touch your own.
+
+### lent models are proxied, never exposed
+
+When a neighbor lends their LLM — `serve-llm`, tailnet-only by default or
+`--funnel` for the public internet — their endpoint trusts exactly **one
+secret, and the exchange is the only holder**. The crowd can reach the model,
+but nobody hits it directly:
+
+```
+you ──── Bearer pl-… ────▶ the exchange ──── Bearer <host secret> ────▶ the host
+        (atproto-keyed)                      (registered privately)
+```
+
+The daemon hands the exchange its secret at registration and nowhere else; the
+catalog stores the host's url + secret privately and **never republishes
+them** — `GET /api/hosts` lists only names and models, never an address. A
+request for a lent model (`model: "<its name>"` on `/v1/chat/completions`) is
+authenticated as you, then proxied to the host with the secret. A direct hit
+from the open internet has no secret and gets a `401` — funneled or not. **The
+host authenticates *us*; we authenticate *you*.**
+
+### personas connect out, so there's nothing to attack
+
+A bot you run dials *into* the exchange over a WebSocket and joins by name; the
+server pushes work to it (chat grants, board tasks, routed questions) and it
+never accepts an inbound connection at all. Your machine exposes no endpoint —
+the federation is outbound by construction.
 
 ---
 
