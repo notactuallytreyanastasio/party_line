@@ -14,7 +14,7 @@ defmodule PartyLineWeb.HostController do
   alias PartyLine.Hosts
 
   def register(conn, params) do
-    case Hosts.register(params) do
+    case Hosts.register(conn.assigns.did, params) do
       {:ok, %{id: id, ttl_seconds: ttl}} ->
         conn
         |> put_status(:created)
@@ -28,19 +28,20 @@ defmodule PartyLineWeb.HostController do
   end
 
   def heartbeat(conn, %{"id" => id}) do
-    case Hosts.heartbeat(id) do
+    case Hosts.heartbeat(id, conn.assigns.did) do
       :ok ->
         json(conn, %{ok: true, data: %{id: id}})
 
       {:error, :unknown} ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{ok: false, error: "unknown host"})
+        conn |> put_status(:not_found) |> json(%{ok: false, error: "unknown host"})
+
+      {:error, :forbidden} ->
+        conn |> put_status(:forbidden) |> json(%{ok: false, error: "not your host"})
     end
   end
 
   def deregister(conn, %{"id" => id}) do
-    :ok = Hosts.deregister(id)
+    :ok = Hosts.deregister(id, conn.assigns.did)
     send_resp(conn, :no_content, "")
   end
 

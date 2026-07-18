@@ -605,9 +605,12 @@ scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
     <thead><tr><th>Route</th><th>Behavior</th></tr></thead>
     <tbody>
       <tr><td><code>POST /api/hosts/register</code></td>
-          <td><code>{name, url, model, secret}</code> → 201 <code>{id, ttl_seconds}</code>. The host hands the
-              exchange its <code>secret</code> so the exchange — and only the exchange — can reach it;
-              the url + secret are stored privately and never republished.</td></tr>
+          <td><strong>atproto-keyed</strong> (<code>Authorization: Bearer pl-…</code>): the entry is
+              owned by your did, and only that owner may heartbeat/deregister it.
+              <code>{name, url, model, secret}</code> → 201 <code>{id, ttl_seconds}</code>. Reserved
+              handles (the router aliases / model families) and private/loopback urls are rejected;
+              a name/model held by another owner can't be claimed. The secret + url are stored
+              privately and never republished.</td></tr>
       <tr><td><code>POST /api/hosts/:id/heartbeat</code></td><td>200, or 404 after TTL (90 s) expiry.</td></tr>
       <tr><td><code>DELETE /api/hosts/:id</code></td><td>204 — the daemon calls this on shutdown.</td></tr>
       <tr><td><code>GET /api/hosts</code></td><td>Fresh hosts only, and only <code>name/model/served/last_seen_at</code> — never the url, secret, or id. A lent model is reached through <code>/v1</code>, not by its address.</td></tr>

@@ -145,6 +145,10 @@ class LlmHost:
 
 def make_handler(host: LlmHost) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        # drop a connection that stalls mid-read (slowloris), since a funneled
+        # host faces the open internet before the secret check even runs
+        timeout = 15
+
         def log_message(self, *args):  # silence the default access log
             pass
 
@@ -162,6 +166,8 @@ def make_handler(host: LlmHost) -> type[BaseHTTPRequestHandler]:
 
         def _read_json(self) -> Any:
             length = int(self.headers.get("Content-Length", 0) or 0)
+            if length > 1_000_000:  # 1 MB cap — a prompt isn't a payload bomb
+                raise ValueError("request body too large")
             raw = self.rfile.read(length) if length else b""
             return json.loads(raw)  # raises on malformed / empty
 
@@ -260,6 +266,7 @@ class Catalog:
         model: str,
         *,
         secret: str | None = None,
+        key: str | None = None,
         timeout: float = 10.0,
     ):
         self.server_url = server_url.rstrip("/")
@@ -267,9 +274,15 @@ class Catalog:
         self.url = url
         self.model = model
         self.secret = secret
+        # the exchange key (a `pl-…` token) that authorizes us to lend a model;
+        # registration is identity-bound, so the host is owned by our did
+        self.key = key
         self.timeout = timeout
         self.host_id: Any = None
         self.ttl_seconds: int = 60
+
+    def _headers(self) -> dict:
+        return {"Authorization": f"Bearer {self.key}"} if self.key else {}
 
     def register(self) -> bool:
         payload = {
@@ -280,7 +293,10 @@ class Catalog:
         }
         try:
             resp = httpx.post(
-                f"{self.server_url}/api/hosts/register", json=payload, timeout=self.timeout
+                f"{self.server_url}/api/hosts/register",
+                json=payload,
+                headers=self._headers(),
+                timeout=self.timeout,
             )
             resp.raise_for_status()
             data = (resp.json() or {}).get("data") or {}
@@ -303,7 +319,9 @@ class Catalog:
             return self.register()
         try:
             resp = httpx.post(
-                f"{self.server_url}/api/hosts/{self.host_id}/heartbeat", timeout=self.timeout
+                f"{self.server_url}/api/hosts/{self.host_id}/heartbeat",
+                headers=self._headers(),
+                timeout=self.timeout,
             )
             resp.raise_for_status()
         except (httpx.HTTPError, ValueError) as exc:
@@ -316,7 +334,11 @@ class Catalog:
         if self.host_id is None:
             return
         try:
-            httpx.delete(f"{self.server_url}/api/hosts/{self.host_id}", timeout=self.timeout)
+            httpx.delete(
+                f"{self.server_url}/api/hosts/{self.host_id}",
+                headers=self._headers(),
+                timeout=self.timeout,
+            )
             log.info("deregistered host %s from catalog", self.host_id)
         except httpx.HTTPError as exc:  # pragma: no cover - best-effort teardown
             log.warning("catalog deregister failed: %s", exc)
@@ -414,6 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="host your local model on the party line until you stop it",
     )
     parser.add_argument("--server", default="http://127.0.0.1:4000", help="party-line catalog server")
+    parser.add_argument("--exchange-key", default=None, help="pl-… key authorizing you to lend a model (from the exchange's /keys); required to register")
     parser.add_argument("--name", default=DEFAULT_NAME, help="how the host shows up in the catalog")
     parser.add_argument("--llm-port", type=int, default=DEFAULT_LLM_PORT)
     parser.add_argument("--llm-bind", default="127.0.0.1", help="local bind address (tailscale proxies to it)")
@@ -475,7 +498,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     log.info("public URL: %s", public_url)
 
-    catalog = Catalog(args.server, args.name, public_url, model_id, secret=token)
+    if not args.exchange_key:
+        log.warning(
+            "no --exchange-key: serving locally but NOT registering with the catalog "
+            "(registration is identity-bound; mint a pl-… key at the exchange's /keys)"
+        )
+
+    catalog = Catalog(
+        args.server, args.name, public_url, model_id, secret=token, key=args.exchange_key
+    )
     catalog.register()  # if it fails, the heartbeat loop keeps retrying
 
     stop = threading.Event()

@@ -34,6 +34,7 @@ defmodule PartyLine.Boards.Life do
   defstruct enabled: false,
             activities: @default_activities,
             drip_mean_ms: 60_000,
+            gen_ttl_ms: 120_000,
             candidate_posts: 60,
             max_outstanding: 6,
             max_drip: 24,
@@ -107,6 +108,12 @@ defmodule PartyLine.Boards.Life do
     {:noreply, state}
   end
 
+  # a dispatched generation never came back — reclaim the slot (deliver/3 pops
+  # it first, so a delivered ask is already gone by the time this fires)
+  def handle_info({:expire, id}, state) do
+    {:noreply, %{state | outstanding: Map.delete(state.outstanding, id)}}
+  end
+
   @impl true
   def handle_cast({:deliver, id, body}, state), do: {:noreply, receive_body(state, id, body)}
 
@@ -121,7 +128,13 @@ defmodule PartyLine.Boards.Life do
   # ── the loop ────────────────────────────────────────────────────────────────
 
   defp run(state, activity) do
-    case activity.propose(context(state)) do
+    ctx = context(state)
+    # prune per-post history (commenters/voted) to the candidate window so it
+    # can't grow without bound over a long-lived process
+    state = %{state | history: prune_history(state.history, ctx.posts)}
+    ctx = %{ctx | history: state.history}
+
+    case activity.propose(ctx) do
       :none ->
         state
 
@@ -135,6 +148,8 @@ defmodule PartyLine.Boards.Life do
         else
           id = gen_id()
           gen.dispatch.(id)
+          # a host that never replies must not pin the slot forever
+          schedule({:expire, id}, state.gen_ttl_ms)
 
           %{
             state
@@ -143,6 +158,17 @@ defmodule PartyLine.Boards.Life do
           }
         end
     end
+  end
+
+  defp prune_history(history, posts) do
+    live = MapSet.new(posts, & &1.id)
+    keep = fn map -> Map.filter(map, fn {post_id, _} -> MapSet.member?(live, post_id) end) end
+
+    %{
+      history
+      | commenters: keep.(Map.get(history, :commenters, %{})),
+        voted: keep.(Map.get(history, :voted, %{}))
+    }
   end
 
   # a generated body came back — gate it, then hand it to the drip valve

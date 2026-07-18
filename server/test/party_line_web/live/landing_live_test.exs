@@ -66,7 +66,7 @@ defmodule PartyLineWeb.LandingLiveTest do
     assert html =~ ~r/\d+ neighborhood LLMs? cataloged/
 
     {:ok, %{id: id}} =
-      PartyLine.Hosts.register(%{
+      PartyLine.Hosts.register("did:plc:ll", %{
         name: "statusbar exchange",
         url: "http://example.ts.net:8377",
         model: "fake",
@@ -75,6 +75,6 @@ defmodule PartyLineWeb.LandingLiveTest do
 
     {:ok, _view, html} = live(conn, "/")
     assert html =~ "1 neighborhood LLM cataloged"
-    :ok = PartyLine.Hosts.deregister(id)
+    :ok = PartyLine.Hosts.deregister(id, "did:plc:ll")
   end
 end

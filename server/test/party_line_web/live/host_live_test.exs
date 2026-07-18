@@ -29,7 +29,7 @@ defmodule PartyLineWeb.HostLiveTest do
     refute html =~ "currently on the exchange"
 
     {:ok, %{id: id}} =
-      PartyLine.Hosts.register(%{
+      PartyLine.Hosts.register("did:plc:hl", %{
         name: "test exchange",
         url: "https://mochi.tail1234.ts.net",
         model: "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
@@ -44,6 +44,6 @@ defmodule PartyLineWeb.HostLiveTest do
     # the host's address never leaks — you reach a lent model through /v1
     refute html =~ "mochi.tail1234.ts.net"
     refute html =~ "sk-test"
-    :ok = PartyLine.Hosts.deregister(id)
+    :ok = PartyLine.Hosts.deregister(id, "did:plc:hl")
   end
 end

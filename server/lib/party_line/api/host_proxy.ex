@@ -30,7 +30,11 @@ defmodule PartyLine.API.HostProxy do
            json: body,
            auth: {:bearer, secret},
            receive_timeout: @receive_timeout,
-           retry: false
+           retry: false,
+           # never chase a redirect — an allowlisted url could otherwise 3xx to
+           # an internal address and defeat the registration-time SSRF check
+           redirect: false,
+           max_redirects: 0
          ) do
       {:ok, %{status: status, body: body}} when status in 200..299 and is_map(body) ->
         {:ok, body}

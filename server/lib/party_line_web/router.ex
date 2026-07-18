@@ -53,7 +53,16 @@ defmodule PartyLineWeb.Router do
 
     post "/dial", DialController, :dial
 
+    # public discovery read — names/models only, never addresses
     get "/hosts", HostController, :index
+  end
+
+  # Lending a model is a privileged, identity-bound act: registration and
+  # liveness are keyed to the same atproto-bound token the completion API uses,
+  # so a host is owned by a did and can't be squatted anonymously.
+  scope "/api", PartyLineWeb do
+    pipe_through :completion_api
+
     post "/hosts/register", HostController, :register
     post "/hosts/:id/heartbeat", HostController, :heartbeat
     delete "/hosts/:id", HostController, :deregister

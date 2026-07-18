@@ -3,22 +3,27 @@ defmodule PartyLineWeb.HostControllerTest do
   # serialized (async: false) and cleans up whatever it registers.
   use PartyLineWeb.ConnCase, async: false
 
+  alias PartyLine.API.Keys
+
   @valid %{
     "name" => "gpu-closet",
     "url" => "http://gpu-closet.tailnet.ts.net:8080",
     "model" => "qwen2.5-coder-7b",
-    "requires_token" => true
+    "secret" => "sk-host"
   }
 
   setup do
     # the public list no longer carries the catalog id (you can't deregister a
     # stranger's host), so clear the whole catalog between tests instead
     on_exit(fn -> PartyLine.Hosts.clear() end)
-    :ok
+    {:ok, _key, token} = Keys.mint("did:plc:owner", "serve-llm")
+    %{token: token}
   end
 
-  defp register!(conn, attrs \\ @valid) do
-    conn = post(conn, ~p"/api/hosts/register", attrs)
+  defp authed(conn, token), do: put_req_header(conn, "authorization", "Bearer #{token}")
+
+  defp register!(conn, token, attrs \\ @valid) do
+    conn = conn |> authed(token) |> post(~p"/api/hosts/register", attrs)
 
     assert %{"ok" => true, "data" => %{"id" => id, "ttl_seconds" => ttl}} =
              json_response(conn, 201)
@@ -26,22 +31,42 @@ defmodule PartyLineWeb.HostControllerTest do
     {id, ttl}
   end
 
-  test "register returns 201 with the id/ttl envelope", %{conn: conn} do
-    {id, ttl} = register!(conn)
+  test "registration requires an atproto-bound key", %{conn: conn} do
+    conn = post(conn, ~p"/api/hosts/register", @valid)
+    assert conn.status == 401
+  end
+
+  test "register returns 201 with the id/ttl envelope", %{conn: conn, token: token} do
+    {id, ttl} = register!(conn, token)
     assert id =~ ~r/\A[0-9a-f]{16}\z/
     assert is_integer(ttl) and ttl > 0
   end
 
-  test "register rejects a bad url with 422", %{conn: conn} do
-    conn = post(conn, ~p"/api/hosts/register", %{@valid | "url" => "ftp://nope"})
+  test "register rejects a bad url with 422", %{conn: conn, token: token} do
+    conn =
+      conn |> authed(token) |> post(~p"/api/hosts/register", %{@valid | "url" => "ftp://nope"})
+
     assert %{"ok" => false, "error" => error} = json_response(conn, 422)
     assert error =~ "url"
   end
 
-  test "index lists cataloged hosts without leaking url, secret, or id", %{conn: conn} do
-    register!(conn)
+  test "register rejects a reserved model name with 422", %{conn: conn, token: token} do
+    conn =
+      conn
+      |> authed(token)
+      |> post(~p"/api/hosts/register", %{@valid | "model" => "party-line-auto"})
 
-    conn = get(conn, ~p"/api/hosts")
+    assert %{"ok" => false, "error" => "reserved_name"} = json_response(conn, 422)
+  end
+
+  test "index lists cataloged hosts without leaking url, secret, or id", %{
+    conn: conn,
+    token: token
+  } do
+    register!(conn, token)
+
+    # index is a public read — no auth needed
+    conn = get(build_conn(), ~p"/api/hosts")
     assert %{"ok" => true, "data" => %{"hosts" => [host]}} = json_response(conn, 200)
 
     assert host["name"] == "gpu-closet"
@@ -54,22 +79,33 @@ defmodule PartyLineWeb.HostControllerTest do
     refute Map.has_key?(host, "id")
   end
 
-  test "heartbeat returns 200 for a known host", %{conn: conn} do
-    {id, _ttl} = register!(conn)
+  test "heartbeat returns 200 for the owner", %{conn: conn, token: token} do
+    {id, _ttl} = register!(conn, token)
 
-    conn = post(conn, ~p"/api/hosts/#{id}/heartbeat")
+    conn = conn |> authed(token) |> post(~p"/api/hosts/#{id}/heartbeat")
     assert %{"ok" => true, "data" => %{"id" => ^id}} = json_response(conn, 200)
   end
 
-  test "heartbeat returns 404 for an unknown host", %{conn: conn} do
-    conn = post(conn, ~p"/api/hosts/deadbeefdeadbeef/heartbeat")
+  test "a different identity can't heartbeat someone else's host (403)", %{
+    conn: conn,
+    token: token
+  } do
+    {id, _ttl} = register!(conn, token)
+    {:ok, _k, other} = Keys.mint("did:plc:mallory", "attacker")
+
+    conn = conn |> authed(other) |> post(~p"/api/hosts/#{id}/heartbeat")
+    assert %{"ok" => false} = json_response(conn, 403)
+  end
+
+  test "heartbeat returns 404 for an unknown host", %{conn: conn, token: token} do
+    conn = conn |> authed(token) |> post(~p"/api/hosts/deadbeefdeadbeef/heartbeat")
     assert %{"ok" => false, "error" => _} = json_response(conn, 404)
   end
 
-  test "deregister returns 204 and drops the host", %{conn: conn} do
-    {id, _ttl} = register!(conn)
+  test "deregister returns 204 and drops the host", %{conn: conn, token: token} do
+    {id, _ttl} = register!(conn, token)
 
-    conn = delete(conn, ~p"/api/hosts/#{id}")
+    conn = conn |> authed(token) |> delete(~p"/api/hosts/#{id}")
     assert response(conn, 204) == ""
 
     conn = get(build_conn(), ~p"/api/hosts")

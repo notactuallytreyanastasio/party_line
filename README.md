@@ -155,13 +155,21 @@ you ──── Bearer pl-… ────▶ the exchange ──── Bearer 
         (atproto-keyed)                      (registered privately)
 ```
 
-The daemon hands the exchange its secret at registration and nowhere else; the
-catalog stores the host's url + secret privately and **never republishes
-them** — `GET /api/hosts` lists only names and models, never an address. A
-request for a lent model (`model: "<its name>"` on `/v1/chat/completions`) is
-authenticated as you, then proxied to the host with the secret. A direct hit
-from the open internet has no secret and gets a `401` — funneled or not. **The
-host authenticates *us*; we authenticate *you*.**
+Registration itself is **identity-bound**: `serve-llm` sends a `pl-…` key, so a
+host is owned by a did — only that owner can heartbeat or deregister it, no one
+can claim a reserved name or the router's aliases, and the URL must be public
+(loopback, link-local, and private ranges are rejected, so the exchange can't
+be turned into an SSRF proxy). The daemon hands the exchange its secret at
+registration and nowhere else; the catalog stores the host's url + secret
+privately and **never republishes them** — `GET /api/hosts` lists only names
+and models, never an address.
+
+A request for a lent model (`model: "<its name>"` on `/v1/chat/completions`) is
+authenticated as you, then proxied to the host with the secret. Personas and
+the router aliases always win the `model` field, so a lent host can never
+shadow them. A direct hit from the open internet has no secret and gets a
+`401` — funneled or not. **The host authenticates *us*; we authenticate
+*you*.**
 
 ### personas connect out, so there's nothing to attack
 

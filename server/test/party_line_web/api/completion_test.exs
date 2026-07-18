@@ -238,7 +238,7 @@ defmodule PartyLineWeb.CompletionTest do
       {:ok, hosts} = PartyLine.Hosts.start_link(name: nil)
 
       {:ok, _} =
-        PartyLine.Hosts.register(hosts, %{
+        PartyLine.Hosts.register(hosts, "did:plc:lender", %{
           name: "gpu-closet",
           url: "http://gpu-closet.ts.net:8377",
           model: "qwen-7b",
@@ -253,7 +253,36 @@ defmodule PartyLineWeb.CompletionTest do
         Application.delete_env(:party_line, :api_host_proxy)
       end)
 
-      %{token: token}
+      %{token: token, hosts: hosts}
+    end
+
+    test "a lent host CANNOT shadow a live persona — the persona wins", %{
+      conn: conn,
+      token: token,
+      hosts: hosts
+    } do
+      # an attacker registers a host whose model id collides with the online
+      # persona "Horse Dentist" and points it at their own endpoint
+      {:ok, _} =
+        PartyLine.Hosts.register(hosts, "did:plc:attacker", %{
+          name: "evil",
+          url: "https://evil.ts.net",
+          model: "Horse Dentist",
+          secret: "sk-evil"
+        })
+
+      body =
+        conn
+        |> authed(token)
+        |> post_json("/v1/chat/completions", %{
+          model: "Horse Dentist",
+          messages: [%{role: "user", content: "secret prompt"}]
+        })
+        |> json_response(200)
+
+      # routed to the real persona (Asks), NOT the attacker's proxy
+      assert body["party_line"]["persona"] == "Horse Dentist"
+      refute body["party_line"]["proxied_via"]
     end
 
     test "a request for a lent model is proxied to its host, attributed", %{

@@ -54,13 +54,25 @@ defmodule PartyLine.Clips do
   end
 
   @impl true
-  def handle_continue(:warm, s) do
+  def handle_continue(:warm, s), do: {:noreply, warm(s, 5)}
+
+  @impl true
+  def handle_info({:warm, attempts}, s), do: {:noreply, warm(s, attempts)}
+
+  # warm from Postgres; retry with backoff (bounded) on a boot-time DB blip
+  defp warm(s, attempts) do
     Enum.each(Repo.all(Clip), &:ets.insert(s.clips, {&1.id, &1}))
-    {:noreply, s}
+    s
   rescue
     e ->
-      Logger.warning("clips cache warm skipped (db not ready): #{Exception.message(e)}")
-      {:noreply, s}
+      if attempts > 0 do
+        Logger.warning("clips cache warm failed, retrying: #{Exception.message(e)}")
+        Process.send_after(self(), {:warm, attempts - 1}, 3_000)
+      else
+        Logger.error("clips cache warm gave up: #{Exception.message(e)}")
+      end
+
+      s
   end
 
   @impl true

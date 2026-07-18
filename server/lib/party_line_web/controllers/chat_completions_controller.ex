@@ -25,14 +25,36 @@ defmodule PartyLineWeb.ChatCompletionsController do
       when is_list(messages) and messages != [] do
     model = params["model"]
 
-    case Hosts.served(hosts_server(), model) do
-      nil -> persona(conn, OpenAI.parse_messages(messages), model, params["stream"] == true)
-      host -> proxy(conn, params, host)
+    # personas, the router aliases, and the model families ALWAYS win — a lent
+    # host can never shadow them. Only a model id the exchange doesn't route
+    # itself is looked up as a lent host.
+    if persona_route?(model) do
+      persona(conn, OpenAI.parse_messages(messages), model, params["stream"] == true)
+    else
+      case Hosts.served(hosts_server(), model) do
+        nil -> persona(conn, OpenAI.parse_messages(messages), model, params["stream"] == true)
+        host -> proxy(conn, params, host)
+      end
     end
   end
 
   def create(conn, _params) do
     bad_request(conn, "`messages` is required and must be a non-empty array")
+  end
+
+  # nil / an alias / a family / a live persona name → the persona (Asks) path
+  @reserved ~w(party-line-auto auto default party-line gpt-oss gemma llama qwen mistral phi)
+  defp persona_route?(nil), do: true
+
+  defp persona_route?(model) when is_binary(model) do
+    down = model |> String.trim() |> String.downcase()
+    down in @reserved or live_persona?(down)
+  end
+
+  defp persona_route?(_), do: true
+
+  defp live_persona?(down) do
+    bots_server() |> PartyLine.Bots.cards() |> Enum.any?(&(String.downcase(&1.persona) == down))
   end
 
   defp persona(conn, parsed, model, true), do: stream(conn, parsed, model)
@@ -46,14 +68,16 @@ defmodule PartyLineWeb.ChatCompletionsController do
   defp proxy(conn, params, host) do
     case host_proxy().chat(host, Map.put(params, "stream", false)) do
       {:ok, completion} ->
-        tagged = tag(completion, host)
+        # never reflect the host's raw response body — pull only the assistant
+        # text (coerced to a string) and rebuild a clean completion with the
+        # exchange's own attribution, so a hostile host can't exfiltrate an
+        # internal response or forge the model/attribution fields
+        content = extract_content(completion)
 
         if params["stream"] == true do
-          content = get_in(completion, ["choices", Access.at(0), "message", "content"]) || ""
-          model = completion["model"] || host.model
-          stream_raw(conn, OpenAI.stream_frames_for(content, model))
+          stream_raw(conn, OpenAI.stream_frames_for(content, host.model))
         else
-          json(conn, tagged)
+          json(conn, clean_completion(content, host))
         end
 
       {:error, :host_unreachable} ->
@@ -64,12 +88,24 @@ defmodule PartyLineWeb.ChatCompletionsController do
     end
   end
 
-  defp tag(completion, host) do
-    Map.put(completion, "party_line", %{
-      "proxied_via" => "exchange",
-      "host" => host.name,
-      "model" => host.model
-    })
+  defp extract_content(completion) do
+    case get_in(completion, ["choices", Access.at(0), "message", "content"]) do
+      content when is_binary(content) -> content
+      _ -> ""
+    end
+  end
+
+  defp clean_completion(content, host) do
+    %{
+      id: "chatcmpl-" <> Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false),
+      object: "chat.completion",
+      created: System.system_time(:second),
+      model: host.model,
+      choices: [
+        %{index: 0, message: %{role: "assistant", content: content}, finish_reason: "stop"}
+      ],
+      party_line: %{proxied_via: "exchange", host: host.name, model: host.model}
+    }
   end
 
   defp complete(conn, parsed, model) do
@@ -162,6 +198,7 @@ defmodule PartyLineWeb.ChatCompletionsController do
   end
 
   defp asks_server, do: Application.get_env(:party_line, :api_asks, PartyLine.Asks)
+  defp bots_server, do: Application.get_env(:party_line, :api_bots, PartyLine.Bots)
   defp hosts_server, do: Application.get_env(:party_line, :api_hosts, PartyLine.Hosts)
   defp host_proxy, do: Application.get_env(:party_line, :api_host_proxy, PartyLine.API.HostProxy)
 end

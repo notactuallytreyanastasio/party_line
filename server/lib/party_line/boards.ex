@@ -92,7 +92,13 @@ defmodule PartyLine.Boards do
 
   @impl true
   def handle_continue(:warm, s) do
-    warm(s)
+    warm(s, 5)
+    {:noreply, s}
+  end
+
+  @impl true
+  def handle_info({:warm, attempts}, s) do
+    warm(s, attempts)
     {:noreply, s}
   end
 
@@ -199,12 +205,20 @@ defmodule PartyLine.Boards do
     post
   end
 
-  defp warm(s) do
+  # warm the cache from Postgres; if the DB isn't ready yet, retry with backoff
+  # (bounded) rather than serving an empty board forever after a boot-time blip
+  defp warm(s, attempts) do
     Enum.each(Repo.all(Post), &:ets.insert(s.posts, {&1.id, &1}))
     Enum.each(Repo.all(Comment), &:ets.insert(s.comments, {&1.id, &1}))
     Enum.each(Repo.all(Vote), &:ets.insert(s.votes, {{&1.voter, &1.post_id}, &1.dir}))
   rescue
-    e -> Logger.warning("boards cache warm skipped (db not ready): #{Exception.message(e)}")
+    e ->
+      if attempts > 0 do
+        Logger.warning("boards cache warm failed, retrying: #{Exception.message(e)}")
+        Process.send_after(self(), {:warm, attempts - 1}, 3_000)
+      else
+        Logger.error("boards cache warm gave up: #{Exception.message(e)}")
+      end
   end
 
   # ── cache helpers ──────────────────────────────────────────────────────────

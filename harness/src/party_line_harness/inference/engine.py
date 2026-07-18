@@ -57,7 +57,9 @@ def extract_channel_final(text: str) -> str:
         final = text
 
     # strip residual control tokens of either dialect
-    return re.sub(r"<\|?[a-z_]+\|?>", "", final).strip()
+    # only real control tokens (<|channel|>, <|end|>, …) — require the pipes so
+    # ordinary angle-bracket text in a completion (e.g. "<html>") survives
+    return re.sub(r"<\|[a-z_]+\|>", "", final).strip()
 
 
 class Engine(Protocol):
