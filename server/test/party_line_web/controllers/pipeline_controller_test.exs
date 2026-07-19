@@ -91,6 +91,29 @@ defmodule PartyLineWeb.PipelineControllerTest do
     assert %{"ok" => false} = json_response(out, 404)
   end
 
+  test "heartbeat of an unknown shard is a 404, not a 500", %{conn: conn, token: token} do
+    conn = conn |> authed(token) |> post(~p"/api/pipelines/deadbeefdeadbeef/heartbeat")
+    assert %{"ok" => false, "error" => _} = json_response(conn, 404)
+  end
+
+  test "deregistering a shard you don't own is a silent 204 no-op", %{conn: conn, token: token} do
+    conn2 = conn |> authed(token) |> post(~p"/api/pipelines/register", @shard)
+    %{"data" => %{"id" => id}} = json_response(conn2, 201)
+
+    {:ok, _k, other} = Keys.mint("did:plc:notyours", "other")
+    assert response(conn |> authed(other) |> delete(~p"/api/pipelines/#{id}"), 204) == ""
+
+    # it's still there — the non-owner's delete did nothing
+    body = get(build_conn(), ~p"/api/pipelines") |> json_response(200)
+    assert body["data"]["pipelines"] != []
+  end
+
+  test "lease without a model is a 400", %{conn: conn, token: token} do
+    conn = conn |> authed(token) |> post(~p"/api/pipelines/lease", %{})
+    assert %{"ok" => false, "error" => error} = json_response(conn, 400)
+    assert error =~ "model"
+  end
+
   test "heartbeat and deregister are owner-bound", %{conn: conn, token: token} do
     conn2 = conn |> authed(token) |> post(~p"/api/pipelines/register", @shard)
     %{"data" => %{"id" => id}} = json_response(conn2, 201)

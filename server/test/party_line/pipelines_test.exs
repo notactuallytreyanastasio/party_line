@@ -174,5 +174,22 @@ defmodule PartyLine.PipelinesTest do
       assert {:error, :forbidden} = Pipelines.heartbeat(pid, id, @b)
       assert :ok = Pipelines.heartbeat(pid, id, @a)
     end
+
+    test "the sweep timer actually prunes dead shards from state", %{pid: _pid} do
+      # a real TTL with a fast sweep — the timer (not just the read filter) must
+      # drop the entry, and reschedule itself so it keeps sweeping
+      {:ok, sweeper} = Pipelines.start_link(name: nil, ttl: 20, sweep: 20)
+      {:ok, _} = Pipelines.register(sweeper, @a, shard("m", 0, 2))
+      assert Pipelines.count(sweeper) == 1
+
+      # wait out the TTL + a couple sweep ticks
+      Process.sleep(120)
+      assert Pipelines.count(sweeper) == 0
+
+      # the timer is still alive and pruning a second registration too
+      {:ok, _} = Pipelines.register(sweeper, @a, shard("m", 1, 2))
+      Process.sleep(120)
+      assert Pipelines.count(sweeper) == 0
+    end
   end
 end

@@ -825,6 +825,48 @@ def test_driver_generates_over_http_transport_end_to_end():
         d1.shutdown()
 
 
+def test_serve_shard_rejects_an_oversized_frame_with_400():
+    import httpx
+
+    from party_line_harness.pipeline import serve_shard
+    from party_line_harness.pipeline.serve_shard import ShardHost
+
+    host = ShardHost(FakeStage(), "m", token="sek")
+    httpd, port = _serve(host)
+    orig = serve_shard.MAX_FRAME
+    serve_shard.MAX_FRAME = 64  # tiny cap so a normal frame trips it
+    try:
+        frame = wire.encode_frame({"session": "s0", "want": "hidden", "tokens": list(range(100))})
+        assert len(frame) > 64
+        r = httpx.post(
+            f"http://127.0.0.1:{port}/pipeline/forward",
+            content=frame,
+            headers={"Authorization": "Bearer sek"},
+        )
+        assert r.status_code == 400 and "too large" in r.json()["error"]
+    finally:
+        serve_shard.MAX_FRAME = orig
+        httpd.shutdown()
+
+
+def test_serve_shard_rejects_a_malformed_frame_with_400():
+    import httpx
+
+    from party_line_harness.pipeline.serve_shard import ShardHost
+
+    host = ShardHost(FakeStage(), "m", token="sek")
+    httpd, port = _serve(host)
+    try:
+        r = httpx.post(
+            f"http://127.0.0.1:{port}/pipeline/forward",
+            content=b"not a PLPS frame at all",
+            headers={"Authorization": "Bearer sek"},
+        )
+        assert r.status_code == 400
+    finally:
+        httpd.shutdown()
+
+
 def test_serve_shard_forward_and_reset_and_health():
     import httpx
 

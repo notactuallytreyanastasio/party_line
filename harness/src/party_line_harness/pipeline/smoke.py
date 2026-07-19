@@ -52,6 +52,35 @@ def _split(model, prompt_ids: list[int], n_stages: int, eos: set[int], n: int) -
     )
 
 
+def _reference_sampled(model, prompt_ids: list[int], n: int, temp: float, seed: int) -> list[int]:
+    """Sampled tokens from the whole model under a fixed seed — the oracle for
+    the temperature>0 path (the pipeline-host default, which greedy never hits)."""
+    import mlx.core as mx
+    from mlx_lm.generate import generate_step
+    from mlx_lm.sample_utils import make_sampler
+
+    mx.random.seed(seed)
+    sampler = make_sampler(temp=temp, top_p=0.95)
+    out: list[int] = []
+    for (token, _lp), _ in zip(generate_step(mx.array(prompt_ids), model, sampler=sampler), range(n)):
+        out.append(int(token.item()) if hasattr(token, "item") else int(token))
+    return out
+
+
+def _split_sampled(model, prompt_ids: list[int], n_stages: int, eos: set[int], n: int, temp: float, seed: int) -> list[int]:
+    """Sampled tokens through the split under the same seed — must match the
+    whole model, so a broken sampler/top_p/logprobs path can't ship green."""
+    import mlx.core as mx
+
+    n_layers = len(_trunk(model).layers)
+    stages = [PipelineStage(model, shard) for shard in partition_layers(n_layers, n_stages)]
+    mx.random.seed(seed)
+    return driver.generate(
+        driver.LocalTransport(stages), prompt_ids, max_tokens=n, eos_ids=eos,
+        sample=True, temperature=temp, top_p=0.95, session="sampled",
+    )
+
+
 def _sharded_split(model_id: str, prompt_ids: list[int], n_stages: int, eos: set[int], n: int):
     """Greedy tokens through a real partial-load split — each shard is loaded via
     ``PipelineStage.load``, holding only its own weights (the ``serve-shard``
@@ -99,6 +128,17 @@ def main() -> int:
         mark = "OK — identical to the whole model" if match else "MISMATCH"
         print(f"  {got}")
         print(f"  {mark}\n")
+
+    # temperature>0 sampling — the pipeline-host default, which greedy never
+    # exercises. Same seed → the lossless split must sample identically.
+    print("2-way split, temperature 0.8 (seeded sampling path) …", flush=True)
+    ref_s = _reference_sampled(model, prompt_ids, N_TOKENS, temp=0.8, seed=1234)
+    got_s = _split_sampled(model, prompt_ids, 2, eos, N_TOKENS, temp=0.8, seed=1234)
+    match = got_s == ref_s
+    ok = ok and match
+    print(f"  whole: {ref_s}")
+    print(f"  split: {got_s}")
+    print(f"  {'OK — identical sampled sequence' if match else 'MISMATCH'}\n")
 
     # the real serve-shard path: each shard loads only its own weights.
     del model  # free the whole model before measuring a shard's footprint
