@@ -255,6 +255,9 @@ class PipelineChat:
 
 def make_handler(chat: PipelineChat, host_name: str, token: str) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        # HTTP/1.1 keep-alive for JSON completions (they carry Content-Length);
+        # the SSE branch, which has none, opts back into close-delimiting.
+        protocol_version = "HTTP/1.1"
         timeout = 15
 
         def log_message(self, *args):
@@ -322,10 +325,14 @@ def make_handler(chat: PipelineChat, host_name: str, token: str) -> type[BaseHTT
 
             def start() -> None:
                 nonlocal started
-                # SSE has no Content-Length, so bypass _send and write directly
+                # SSE has no Content-Length and we don't chunk-encode, so the
+                # body is delimited by connection close — opt out of the
+                # handler's HTTP/1.1 keep-alive for this one response.
+                self.close_connection = True
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
                 self.end_headers()
                 started = True
 

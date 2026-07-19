@@ -172,6 +172,10 @@ class ShardHost:
 
 def make_handler(host: ShardHost) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        # HTTP/1.1 so the driver's pooled client keeps ONE TCP connection per
+        # shard instead of a fresh handshake per token — every response carries
+        # a Content-Length, so keep-alive is safe. Default 1.0 closed each one.
+        protocol_version = "HTTP/1.1"
         timeout = 30
 
         def log_message(self, *args):
