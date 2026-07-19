@@ -606,6 +606,27 @@ driver:     party-line-harness pipeline-run --model &lt;id&gt; \
      shard that crashed and came back recovers with the caller seeing nothing but latency. A hop
      still dead after the retry is a 502 naming the stage; <code>pipeline-run</code> preflights every
      hop's <code>/healthz</code> before spending a prefill.</p>
+
+  <h3>Working state: the demo, streaming, and the switchboard log</h3>
+  <p><code>scripts/split_demo.sh</code> boots the whole stack — exchange, two shards, pipeline host,
+     key mint, one real completion — and ends on <strong>the switchboard</strong>: a merged live tail
+     of all four logs. Every question narrates its own lifecycle under one <code>chat-…</code> id
+     (the request id doubles as the shard session id, so it lines up across every machine):</p>
+  <pre><code>[exchange]       completion → lent host "assembled-8b" (…8B…)
+[pipeline-host]  q chat-9ea41: "What is a telephone party line?" (42 prompt tokens)
+[shard-A]        chat-9ea41: prefill 42 tokens through stage 0/2 layers 0-15 (99ms)
+[shard-A]        chat-9ea41: 8 forwards through layers 0-15  (~10ms/step)
+[shard-B]        chat-9ea41: 8 forwards through layers 16-31 (~11ms/step)
+[pipeline-host]  chat-9ea41 ▸ A telephone party line is a type of
+[pipeline-host]  a chat-9ea41: 40 tokens in 1.8s (22 tok/s) across 2 stages</code></pre>
+  <p>Two more pieces of working state: <code>stream: true</code> against the pipeline host is
+     <strong>real SSE</strong> — OpenAI <code>chat.completion.chunk</code> events as the two halves
+     generate them (the exchange's proxy still re-emits whole answers; a streaming relay through the
+     proxy is the remaining server-side piece). And a shard now <strong>downloads only its own weight
+     files</strong>, selected from <code>model.safetensors.index.json</code> — layers by range, the
+     embedding to the first shard, norm + head to the last — and never loads a tokenizer. A
+     single-file model still fetches its one file; the disk win needs the multi-file packing bigger
+     models use.</p>
   <ul>
     <li><strong>Only hidden states cross the wire.</strong> Shard 0 embeds the token(s) and runs its
       layer block, then ships the hidden state <code>[batch, seq, hidden]</code> to shard 1, which runs
@@ -895,7 +916,7 @@ friends: []                  # reserved — bot friends list</code></pre>
 
 <footer>
   party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–417) ·
-  last aligned with the code: 2026-07-19 (pipeline-host — a model no single machine could hold, on /v1)
+  last aligned with the code: 2026-07-19 (split inference at working state — demo, streaming, the switchboard log)
 </footer>
 </main>
 </div>

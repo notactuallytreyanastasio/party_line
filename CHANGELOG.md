@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Split inference reaches working state
+- **`scripts/split_demo.sh`** — the whole stack, one command: exchange, two
+  shards, pipeline host, key mint, one real completion, Ctrl-C teardown.
+  Live-verified end to end on the default 8B.
+- **Real SSE streaming off an assembled pipeline**: `stream: true` on the
+  pipeline-host emits OpenAI `chat.completion.chunk` events as two
+  half-machines generate them (headers go out lazily, so pre-stream errors keep
+  their JSON statuses; a mid-stream heal restarts from token zero). The
+  exchange's proxy still re-emits full answers — a streaming relay through the
+  proxy is the remaining server-side piece.
+- **Disk-sharded loading**: a shard now downloads only the safetensors files
+  holding its own tensors (selected from `model.safetensors.index.json` —
+  layers by range, embedding to the first shard, norm + head to the last), and
+  never loads a tokenizer. Single-file models still fetch their one file; the
+  disk win needs the multi-file packing bigger models use. RAM stays fractional
+  either way, and the MLX smoke stays bit-identical through the new path.
+
 ### pipeline-host — the capstone: an assembled pipeline on /v1
 - `party-line-harness pipeline-host --model <id> --server … --exchange-key pl-…`
   leases a ready pipeline, fronts it as an OpenAI endpoint (holding only the

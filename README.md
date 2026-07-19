@@ -244,8 +244,16 @@ uv run party-line-harness serve-llm --server http://<exchange>:4000
 ```
 
 Too big for one machine? Split it across two — each host runs part of the
-layers, the hidden state passes between them. Register the shards with the
-exchange and it assembles the pipeline; a driver leases it by name:
+layers, the hidden state passes between them. Try the whole thing with one
+command (exchange + two shards + the stitcher, one real answer, Ctrl-C to
+hang up):
+
+```bash
+scripts/split_demo.sh
+```
+
+Or wire it yourself: register the shards with the exchange and it assembles
+the pipeline; a driver leases it by name:
 
 ```bash
 # machine A                                          # machine B
@@ -263,13 +271,18 @@ And to put the assembled model on the public API, run a **pipeline host**: it
 leases the pipeline, fronts it as an OpenAI endpoint (holding only the
 tokenizer, never a weight), and registers in the host catalog — so a model
 **no single machine could hold** answers on `/v1/chat/completions` like
-anything else:
+anything else. `stream: true` against the pipeline host is real SSE, tokens
+arriving as two half-machines generate them:
 
 ```bash
 pipeline-host --model <id> --server http://<exchange>:4000 --exchange-key pl-…
 # then, from anywhere, with any OpenAI client:
 #   POST /v1/chat/completions  {"model": "<id>", ...}
 ```
+
+Each shard downloads **only its own weight files** (chosen from the model's
+safetensors index) and holds only its slice in memory — a small machine
+contributes a slice it could never host whole.
 
 Or skip the exchange and wire the shards directly:
 `pipeline-run --model <id> --stage http://A=secretA,http://B=secretB --prompt "…"`.
@@ -281,7 +294,8 @@ to operator.
 
 ```bash
 (cd server  && mix check)       # format · credo · 424 tests · assay dialyzer
-(cd harness && uv run pytest)   # 162 tests incl. the pipeline split + e2e skeleton
+(cd harness && uv run pytest)   # 183 tests incl. the pipeline split + e2e skeleton
+scripts/split_demo.sh           # the split-inference stack live, one command
 uv run tools/shots/shoot.py     # regenerate these screenshots (playwright)
 ```
 
