@@ -102,7 +102,9 @@ defmodule PartyLine.Pipelines do
     ttl = Keyword.get(opts, :ttl, @default_ttl)
     sweep = Keyword.get(opts, :sweep, @default_sweep)
     schedule_sweep(sweep)
-    {:ok, %{shards: %{}, ttl: ttl, sweep: sweep}}
+    # `seq` is a strictly-increasing registration counter: `mono` can tie within
+    # a millisecond, so "which registration is newest" needs its own order.
+    {:ok, %{shards: %{}, ttl: ttl, sweep: sweep, seq: 0}}
   end
 
   @impl true
@@ -111,12 +113,19 @@ defmodule PartyLine.Pipelines do
          :ok <- not_reserved(fields),
          :ok <- not_claimed(state, fields, did) do
       id = gen_id()
+      seq = state.seq + 1
 
       entry =
-        Map.merge(fields, %{id: id, did: did, mono: now(), last_seen_at: DateTime.utc_now()})
+        Map.merge(fields, %{
+          id: id,
+          did: did,
+          seq: seq,
+          mono: now(),
+          last_seen_at: DateTime.utc_now()
+        })
 
       {:reply, {:ok, %{id: id, ttl_seconds: div(state.ttl, 1000)}},
-       put_in(state.shards[id], entry)}
+       %{put_in(state.shards[id], entry) | seq: seq}}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
@@ -177,13 +186,20 @@ defmodule PartyLine.Pipelines do
   # ── Assembly ───────────────────────────────────────────────────────────────
 
   # Group live shards by {model, count}; a group is ready when every stage index
-  # 0..count-1 is present.
+  # 0..count-1 is present. The model key is case-insensitive to match `lease` —
+  # two casings of one model are one pipeline, not two phantom incomplete ones.
   defp assemble(entries) do
     entries
-    |> Enum.group_by(&{&1.model, &1.count})
-    |> Enum.map(fn {{model, count}, shards} ->
+    |> Enum.group_by(&{String.downcase(&1.model), &1.count})
+    |> Enum.map(fn {{_down, count}, shards} ->
       present = shards |> Enum.map(& &1.index) |> MapSet.new()
-      %{model: model, count: count, stages_present: MapSet.size(present), ready: complete?(present, count)}
+
+      %{
+        model: hd(shards).model,
+        count: count,
+        stages_present: MapSet.size(present),
+        ready: complete?(present, count)
+      }
     end)
     |> Enum.sort_by(&{&1.model, &1.count})
   end
@@ -197,13 +213,16 @@ defmodule PartyLine.Pipelines do
     |> Enum.find_value(fn {count, shards} -> assemble_lease(shards, count) end)
   end
 
-  # One shard per stage (first-registered wins on a tie), ordered 0..count-1,
-  # only if every stage is present.
+  # One shard per stage (the NEWEST registration wins a tie), ordered
+  # 0..count-1, only if every stage is present. Newest matters: a restarted
+  # daemon re-registers with a fresh secret while its dead predecessor is still
+  # inside the TTL — leasing the old entry would hand out a dead url/stale
+  # secret for up to 90s.
   defp assemble_lease(shards, count) do
     by_index =
       shards
-      |> Enum.sort_by(& &1.mono)
-      |> Enum.reduce(%{}, fn e, acc -> Map.put_new(acc, e.index, e) end)
+      |> Enum.sort_by(& &1.seq)
+      |> Enum.reduce(%{}, fn e, acc -> Map.put(acc, e.index, e) end)
 
     if complete?(MapSet.new(Map.keys(by_index)), count) do
       for i <- 0..(count - 1) do

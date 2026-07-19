@@ -119,6 +119,26 @@ defmodule PartyLine.PipelinesTest do
       {:ok, _} = Pipelines.register(pid, @b, shard("Big-Model", 1, 2))
       assert [_, _] = Pipelines.lease(pid, "big-model")
     end
+
+    test "a restarted shard's NEW registration wins its slot", %{pid: pid} do
+      # the daemon restarts: its dead predecessor is still inside the TTL, but
+      # the fresh registration must be the one leased — the old secret is stale
+      {:ok, _} = Pipelines.register(pid, @a, shard("m", 0, 2, url: "http://old.ts.net", secret: "sk-old"))
+      {:ok, _} = Pipelines.register(pid, @a, shard("m", 0, 2, url: "http://new.ts.net", secret: "sk-new"))
+      {:ok, _} = Pipelines.register(pid, @b, shard("m", 1, 2))
+
+      assert [%{index: 0, url: "http://new.ts.net", secret: "sk-new"} | _] =
+               Pipelines.lease(pid, "m")
+    end
+
+    test "mixed casings across owners still assemble one pipeline", %{pid: pid} do
+      {:ok, _} = Pipelines.register(pid, @a, shard("Model-X", 0, 2))
+      {:ok, _} = Pipelines.register(pid, @b, shard("model-x", 1, 2))
+
+      # one ready pipeline, not two phantom incomplete ones — and it leases
+      assert [%{count: 2, stages_present: 2, ready: true}] = Pipelines.pipelines(pid)
+      assert [_, _] = Pipelines.lease(pid, "MODEL-X")
+    end
   end
 
   describe "liveness" do
