@@ -1,20 +1,21 @@
 """serve-shard: lend one slice of a model to a pipeline.
 
 Loads a single shard (``--stage i/n``) and serves its partial forward over
-HTTP, behind the same secret gate ``serve-llm`` uses — a driver presents the
-secret, relays hidden states through the ordered shards, and the last shard
-samples. Two of these on two machines (``--stage 0/2`` and ``--stage 1/2``,
-same ``--model``) are a two-machine model.
+HTTP, behind an ``Authorization: Bearer`` gate — a driver presents either the
+raw shard secret (hand-wired ``--stage`` setups) or an exchange-minted lease
+token (``_lease_ok``), relays hidden states through the ordered shards, and the
+last shard samples. Two of these on two machines (``--stage 0/2`` and
+``--stage 1/2``, same ``--model``) are a two-machine model.
 
 The wire is the binary frame in ``wire.py``: ``POST /pipeline/forward`` takes a
 header + optional hidden tensor and returns a hidden tensor or a token;
 ``POST /pipeline/reset`` drops a session's caches; ``GET /healthz`` is open.
 
-MLX wants one generation at a time, so every step is serialized behind a lock —
-concurrent driver calls queue exactly as persona clients do in ``serve-llm``.
-The catalog/lease side (having the exchange assemble a pipeline from advertised
-shards) is deliberately not here yet: this is the harness half — two shards and
-a driver that speaks to them — proven first.
+MLX wants one generation at a time, so every model step is funneled through a
+single worker thread (``_submit``) — which also pins the Metal streams to one
+thread. With ``--server``/``--exchange-key`` the shard also registers itself
+with the exchange's pipeline catalog (``ShardCatalog``) so it can be assembled
+and leased; without a key it just serves locally.
 """
 
 from __future__ import annotations

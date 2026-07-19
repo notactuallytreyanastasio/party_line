@@ -4,10 +4,16 @@
 
 Loads a model once, generates greedily with the *whole* model (mlx-lm's own
 ``generate_step`` — the independent reference), then generates the same prompt
-through an N-way in-process split driven over the real wire frame, and asserts
+through an N-way in-process split (and a seeded temperature>0 run) and asserts
 the token ids match exactly. Split hidden states cross as float32, which holds
 every bf16/fp16 value exactly, so a correct split is bit-for-bit identical to
 the whole model — any drift means the surgery is wrong.
+
+The in-process phases use ``LocalTransport`` (direct ``PipelineStage.step``
+calls), so they prove the layer surgery + sampling, not the HTTP frame — the
+``PLPS`` encode/decode is covered model-free in ``test_pipeline.py``. The final
+phase is the real ``serve-shard`` load path (``PipelineStage.load``, each shard
+holding only its own weights).
 
 This is the harness's answer to "the MLX path is smoke-verified, not
 unit-tested": run it on Apple hardware to trust the split.

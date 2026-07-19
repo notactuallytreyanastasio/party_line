@@ -75,7 +75,8 @@
   a model are one pipeline instead of two phantom incomplete ones.
 - Routes: `POST /api/pipelines/register` · `/:id/heartbeat` · `DELETE /:id`
   (all atproto-keyed), `GET /api/pipelines` (public, assembled — no addresses),
-  `POST /api/pipelines/lease` (atproto-keyed → the driver's endpoints + secrets).
+  `POST /api/pipelines/lease` (atproto-keyed → the driver's endpoints, each with
+  a short-lived HMAC token; secrets never leave the exchange).
 - A live `{model, count, index}` slot is owner-bound, so a stranger can't inject
   a poisoned shard into someone's pipeline. The **server still never runs the
   model** — it catalogs, assembles, and leases; the driver stays in the harness.

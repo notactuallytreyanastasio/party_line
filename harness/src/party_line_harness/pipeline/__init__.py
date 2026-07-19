@@ -7,8 +7,13 @@ stage, the final norm + lm_head + sampling on the last, just the layer block in
 between (``stage.py``). Stages talk over a length-prefixed binary frame that
 carries a JSON header plus one hidden-state tensor (``wire.py``). A ``driver``
 tokenizes, walks a token through the ordered stages, and detokenizes the reply
-(``driver.py``); ``serve_shard.py`` exposes a single stage over HTTP, gated by
-the same secret ``serve-llm`` uses.
+(``driver.py``); ``serve_shard.py`` exposes a single stage over HTTP, gated by a
+shard secret or an exchange-minted lease token.
+
+On top of that: ``run.py`` is the ``pipeline-run`` CLI (drive a prompt across
+named or leased shards); ``host.py`` is the ``pipeline-host`` capstone (front an
+assembled pipeline as an OpenAI ``/v1`` endpoint); ``smoke.py`` is the
+lossless-verification run on Apple hardware.
 
 Positions never travel on the wire: each stage keeps its own KV cache, and
 because every stage advances by the same tokens in lockstep, RoPE offsets stay

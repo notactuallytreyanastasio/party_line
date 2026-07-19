@@ -282,7 +282,10 @@ pipeline-host --model <id> --server http://<exchange>:4000 --exchange-key pl-…
 
 Each shard downloads **only its own weight files** (chosen from the model's
 safetensors index) and holds only its slice in memory — a small machine
-contributes a slice it could never host whole.
+contributes a slice it could never host whole. (A single-file model like the
+demo's 4-bit 8B ships as one `model.safetensors`, so it still downloads the
+whole file; the download win needs the multi-file packing bigger models use.
+The RAM stays fractional either way.)
 
 Or skip the exchange and wire the shards directly:
 `pipeline-run --model <id> --stage http://A=secretA,http://B=secretB --prompt "…"`.
@@ -294,7 +297,7 @@ to operator.
 
 ```bash
 (cd server  && mix check)       # format · credo · 424 tests · assay dialyzer
-(cd harness && uv run pytest)   # 183 tests incl. the pipeline split + e2e skeleton
+(cd harness && uv run pytest)   # 187 tests incl. the pipeline split + e2e skeleton
 scripts/split_demo.sh           # the split-inference stack live, one command
 uv run tools/shots/shoot.py     # regenerate these screenshots (playwright)
 ```

@@ -369,7 +369,8 @@
             count, url, secret}</code>. The exchange groups shards by <code>{model, count}</code>,
             marks a model <em>ready</em> when every stage is live (<code>GET /api/pipelines</code>),
             and hands an authenticated driver a <strong>lease</strong> — the ordered
-            <code>[{url, secret}]</code> — via <code>POST /api/pipelines/lease</code></td>
+            <code>[{url, token}]</code>, each a short-lived HMAC derived from that shard's secret
+            (the secret never leaves the exchange) — via <code>POST /api/pipelines/lease</code></td>
         <td>Split inference becomes real in the party line: strangers pool machines and the exchange
             finds the complete pipelines. The server still <strong>never runs the model</strong> — it
             only catalogs, assembles, and leases; the driver lives in the harness. A live slot is
@@ -787,19 +788,27 @@ POST /v1/generate          {persona, topic, roster_names,
      <code>--engine remote --remote-url … --remote-token …</code>.</p>
 
   <h3>Pipeline shard endpoint (per shard, spoken by the driver)</h3>
-  <p><code>party-line-harness serve-shard</code> exposes one slice of a model behind one
-     <code>Authorization: Bearer &lt;secret&gt;</code>. The body is a length-prefixed binary
+  <p><code>party-line-harness serve-shard</code> exposes one slice of a model behind an
+     <code>Authorization: Bearer</code> credential — <strong>either</strong> the raw shard secret
+     (hand-wired <code>--stage</code> setups) <strong>or</strong> an exchange-minted lease token
+     (the normal path; the exchange never hands out the secret itself). A lease token is
+     <code>plsl1.&lt;expiry&gt;.&lt;base64url-hmac&gt;</code>, where the MAC is HMAC-SHA256 over
+     <code>pl-shard-lease|v1|&lt;model&gt;|&lt;count&gt;|&lt;index&gt;|&lt;expiry&gt;</code> keyed by that
+     shard's secret; the shard recomputes it from its own registration to verify, so a token works on
+     one shard's slot only and expires on its own. The body is a length-prefixed binary
      <strong>frame</strong> — a <code>PLPS</code> magic, a <code>u32</code> header length, a JSON
      header, then an optional NumPy <code>.npy</code> hidden-state tensor:</p>
   <pre><code>GET  /healthz          → {"ok": true, "model": …, "shard": "stage 0/2 layers 0-15"}
 POST /pipeline/forward  frame{session, want:"hidden"|"token", tokens?, sample, temperature, top_p}
                         + hidden tensor?     → frame{kind:"hidden"} + tensor
                                                │ or frame{kind:"token", token}   (last shard)
+                                               │ 503 if the shard is oversubscribed (session evicted)
 POST /pipeline/reset    frame{session}       → frame{kind:"ok"}   (drop the session's KV caches)</code></pre>
   <p>Shard 0 is called with <code>tokens</code> (the prompt on prefill, one token per decode step);
      interior shards with the previous shard's <code>hidden</code> tensor; the last shard with
      <code>want:"token"</code> samples and returns the id. The driver relays the opaque tensor stage to
-     stage and never interprets it — only the final token, which it detokenizes.</p>
+     stage and never interprets it — only the final token, which it detokenizes. Both servers speak
+     HTTP/1.1 so the driver's pooled client reuses one connection per shard.</p>
 
   <div class="callout">
     Protocol source of truth: <code>server/lib/party_line_web/bot_socket.ex</code> (transport) and
