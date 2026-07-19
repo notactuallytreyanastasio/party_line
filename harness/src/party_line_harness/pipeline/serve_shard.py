@@ -39,14 +39,40 @@ MAX_FRAME = 512_000_000
 
 
 class ShardHost:
-    """A loaded shard plus the lock that serializes Metal work across the
-    threaded HTTP handlers."""
+    """A loaded shard behind a single dedicated MLX worker thread.
+
+    MLX's Metal streams are bound to the thread that created them, and
+    ``ThreadingHTTPServer`` runs every request on a fresh thread — calling into
+    the model from a handler thread dies with "no Stream(gpu, N) in current
+    thread" (the live run caught this; unit tests with fake stages never
+    could). So ALL model work — the load and every step — funnels through one
+    worker thread, which also serializes Metal exactly as ``serve-llm``'s
+    ``LlmHost`` does with its private event loop.
+    """
 
     def __init__(self, stage: PipelineStage, model_id: str, token: str):
         self.stage = stage
         self.model_id = model_id
         self.token = token
-        self._lock = threading.Lock()
+        from concurrent.futures import ThreadPoolExecutor
+
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-shard")
+
+    @classmethod
+    def load(cls, model_id: str, stage_spec: str, *, token: str) -> "ShardHost":
+        """Build the host with its shard loaded ON the worker thread, so every
+        Metal stream the model touches lives where the steps will run."""
+        host = cls.__new__(cls)
+        host.model_id = model_id
+        host.token = token
+        from concurrent.futures import ThreadPoolExecutor
+
+        host._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-shard")
+        host.stage = host._submit(PipelineStage.load, model_id, stage_spec)
+        return host
+
+    def _submit(self, fn, *args, **kwargs):
+        return self._pool.submit(fn, *args, **kwargs).result()
 
     def authorized(self, presented: str) -> bool:
         """The raw secret (manual ``--stage`` wiring by the operator), or a
@@ -91,23 +117,22 @@ class ShardHost:
         session = str(header.get("session", "s0"))
         want = header.get("want", "hidden")
         tokens = header.get("tokens")
-        with self._lock:
-            kind, payload = self.stage.step(
-                session,
-                tokens=tokens,
-                hidden=tensor,
-                want=want,
-                sample=bool(header.get("sample", False)),
-                temperature=float(header.get("temperature", 0.7)),
-                top_p=float(header.get("top_p", 0.95)),
-            )
+        kind, payload = self._submit(
+            self.stage.step,
+            session,
+            tokens=tokens,
+            hidden=tensor,
+            want=want,
+            sample=bool(header.get("sample", False)),
+            temperature=float(header.get("temperature", 0.7)),
+            top_p=float(header.get("top_p", 0.95)),
+        )
         if kind == "token":
             return wire.encode_frame({"kind": "token", "token": int(payload)})
         return wire.encode_frame({"kind": "hidden"}, payload)
 
     def reset(self, header: dict[str, Any]) -> bytes:
-        with self._lock:
-            self.stage.reset(str(header.get("session", "s0")))
+        self._submit(self.stage.reset, str(header.get("session", "s0")))
         return wire.encode_frame({"kind": "ok"})
 
 
@@ -307,10 +332,10 @@ def main(argv: list[str] | None = None) -> int:
 
     token = args.token or secrets.token_urlsafe(24)
     log.info("loading %s shard %s (first run downloads the weights)…", args.model, args.stage)
-    stage = PipelineStage.load(args.model, args.stage)
+    # load THROUGH the host so all MLX work lives on its one worker thread
+    host = ShardHost.load(args.model, args.stage, token=token)
+    stage = host.stage
     log.info("shard ready: %s", stage.shard.label)
-
-    host = ShardHost(stage, args.model, token)
     httpd = make_server(host, bind=args.bind, port=args.port)
     bound_port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

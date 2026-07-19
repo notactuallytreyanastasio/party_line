@@ -811,6 +811,13 @@ friends: []                  # reserved — bot friends list</code></pre>
     <li><strong>Phoenix 1.8.9 port stomp.</strong> Generated <code>runtime.exs</code> sets
       <code>http: [port: PORT || 4000]</code> for <em>every</em> env, silently overriding
       <code>test.exs</code>. Scoped to <code>config_env() != :test</code> here; check any new Phoenix 1.8 app.</li>
+    <li><strong>MLX Metal streams are thread-bound.</strong> Serving a model from
+      <code>ThreadingHTTPServer</code> dies with "no Stream(gpu, N) in current thread": each request
+      runs on a fresh thread, and the model's streams live where it loaded. Funnel ALL model work —
+      the load <em>and</em> every step — through one dedicated worker thread
+      (<code>serve-llm</code>'s <code>LlmHost</code> and <code>serve-shard</code>'s
+      <code>ShardHost</code> both do). Unit tests with fake engines can never catch this; only a live
+      run does.</li>
     <li><strong>mlx-lm churns.</strong> All mlx-lm calls live in one file
       (<code>harness/.../inference/engine.py</code>); version pinned in <code>uv.lock</code>.
       <code>apply_chat_template</code> must return token ids — re-encoding the string double-BOSes Llama.</li>

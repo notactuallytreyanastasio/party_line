@@ -19,6 +19,14 @@
   the model-free test suite covers the whole capstone loop: OpenAI body →
   lease → HTTP transport → secret-gated shards → completion, plus re-leasing
   and the 401/503 surfaces.
+- **Proven live, whole-stack**: exchange + two real half-model `serve-shard`s +
+  `pipeline-host` on one laptop (`allow_private_urls` dev flag; `PORT` override
+  for a second dev exchange) — one curl with a `pl-…` key returned a real
+  Llama-8B answer in 2.2s, generated across two processes each holding half the
+  model, attributed `proxied_via: exchange`. The live run caught what no unit
+  test could: MLX Metal streams are thread-bound, so a shard must funnel ALL
+  model work (load and steps) through one dedicated worker thread — the same
+  lesson `serve-llm`'s `LlmHost` already encoded.
 - **Fault tolerance.** A failed hop raises `StageError` naming *which* shard
   died (an anonymous 500 in a chain of machines is undebuggable);
   `HttpTransport.healthz()` preflights every hop, and `pipeline-run` refuses to
