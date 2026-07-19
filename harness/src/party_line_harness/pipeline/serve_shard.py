@@ -26,7 +26,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from ..serve_llm import resolve_public_url, stop_tailscale
+from ..serve_llm import _heartbeat_loop, resolve_public_url, stop_tailscale
 from . import wire
 from .stage import PipelineStage
 
@@ -139,6 +139,102 @@ def make_server(host: ShardHost, bind: str = "127.0.0.1", port: int = DEFAULT_SH
     return ThreadingHTTPServer((bind, port), make_handler(host))
 
 
+# ── exchange registration ────────────────────────────────────────────────────
+
+
+class ShardCatalog:
+    """Registers this shard with the exchange's pipeline catalog and heartbeats.
+
+    Hands the exchange the shard's ``secret`` at registration so a driver that
+    leases the pipeline (authenticated to the exchange) can reach us — the same
+    reachable-but-never-open contract as ``serve-llm``. Mirrors that daemon's
+    catalog contract (``register``/``heartbeat``/``deregister`` + ``ttl_seconds``)
+    so it reuses the same heartbeat loop.
+    """
+
+    def __init__(self, server_url, model, index, count, url, secret, *, key, name=None, timeout=10.0):
+        self.server_url = server_url.rstrip("/")
+        self.model = model
+        self.index = index
+        self.count = count
+        self.url = url
+        self.secret = secret
+        self.key = key
+        self.name = name
+        self.timeout = timeout
+        self.host_id = None
+        self.ttl_seconds = 60
+
+    def _headers(self):
+        return {"Authorization": f"Bearer {self.key}"} if self.key else {}
+
+    def register(self) -> bool:
+        import httpx
+
+        payload = {
+            "model": self.model,
+            "index": self.index,
+            "count": self.count,
+            "url": self.url,
+            "secret": self.secret,
+            "name": self.name,
+        }
+        try:
+            resp = httpx.post(
+                f"{self.server_url}/api/pipelines/register",
+                json=payload,
+                headers=self._headers(),
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = (resp.json() or {}).get("data") or {}
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("pipeline catalog register failed: %s", exc)
+            return False
+        self.host_id = data.get("id")
+        ttl = data.get("ttl_seconds")
+        if isinstance(ttl, (int, float)) and ttl > 0:
+            self.ttl_seconds = int(ttl)
+        if self.host_id is None:
+            return False
+        log.info("registered shard %s/%s of %s as %s", self.index, self.count, self.model, self.host_id)
+        return True
+
+    def heartbeat(self) -> bool:
+        import httpx
+
+        if self.host_id is None:
+            return self.register()
+        try:
+            resp = httpx.post(
+                f"{self.server_url}/api/pipelines/{self.host_id}/heartbeat",
+                headers=self._headers(),
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("pipeline catalog heartbeat failed: %s; will re-register", exc)
+            self.host_id = None
+            return False
+        return True
+
+    def deregister(self) -> None:
+        import httpx
+
+        if self.host_id is None:
+            return
+        try:
+            httpx.delete(
+                f"{self.server_url}/api/pipelines/{self.host_id}",
+                headers=self._headers(),
+                timeout=self.timeout,
+            )
+            log.info("deregistered shard %s from the pipeline catalog", self.host_id)
+        except httpx.HTTPError as exc:  # pragma: no cover - best-effort teardown
+            log.warning("pipeline catalog deregister failed: %s", exc)
+        self.host_id = None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="party-line-harness serve-shard",
@@ -149,6 +245,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=DEFAULT_SHARD_PORT)
     parser.add_argument("--bind", default="127.0.0.1", help="local bind address (tailscale proxies to it)")
     parser.add_argument("--token", default=None, help="bearer secret (auto-generated if omitted)")
+    parser.add_argument("--server", default=None, help="party-line exchange to register the shard with")
+    parser.add_argument("--exchange-key", default=None, help="pl-… key authorizing you to lend a shard (from /keys)")
+    parser.add_argument("--name", default=None, help="how the shard shows up in the catalog")
     parser.add_argument("--no-tailscale", action="store_true", help="serve localhost only")
     parser.add_argument("--funnel", action="store_true", help="expose to the public internet, not just the tailnet")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -188,6 +287,20 @@ def main(argv: list[str] | None = None) -> int:
         banner, stage.shard.label, public_url, token, args.model, public_url, token, banner,
     )
 
+    # register with the exchange's pipeline catalog so it can be assembled +
+    # leased; without a key we serve locally but don't register (identity-bound).
+    catalog = None
+    hb_stop = threading.Event()
+    if args.server and args.exchange_key:
+        catalog = ShardCatalog(
+            args.server, args.model, stage.shard.index, stage.shard.count,
+            public_url, token, key=args.exchange_key, name=args.name,
+        )
+        catalog.register()
+        threading.Thread(target=_heartbeat_loop, args=(catalog, hb_stop), daemon=True).start()
+    elif args.server:
+        log.warning("no --exchange-key: serving locally but NOT registering (registration is identity-bound)")
+
     stopping = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stopping.set())
     signal.signal(signal.SIGTERM, lambda *_: stopping.set())
@@ -195,6 +308,9 @@ def main(argv: list[str] | None = None) -> int:
     stopping.wait()
 
     log.info("shutting down…")
+    hb_stop.set()
+    if catalog:
+        catalog.deregister()
     if used_tailscale:
         stop_tailscale(funnel=args.funnel)
     httpd.shutdown()

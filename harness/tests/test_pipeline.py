@@ -169,6 +169,97 @@ def test_single_stage_pipeline_still_runs():
     assert t.calls == [(0, "token", "tok")]
 
 
+# ── exchange lease + shard registration (fake exchange, no model) ────────────
+
+
+class _FakeExchange:
+    """Records register/lease calls; returns canned catalog responses."""
+
+    def __init__(self):
+        import json
+
+        self._json = json
+        self.registered: list = []
+        self.auth: list = []
+
+    def handler(self):
+        import json
+        from http.server import BaseHTTPRequestHandler
+
+        outer = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def _reply(self, obj):
+                body = json.dumps(obj).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length", 0) or 0)
+                payload = json.loads(self.rfile.read(n)) if n else {}
+                outer.auth.append(self.headers.get("Authorization"))
+                if self.path == "/api/pipelines/register":
+                    outer.registered.append(payload)
+                    self._reply({"ok": True, "data": {"id": "sh0", "ttl_seconds": 45}})
+                elif self.path == "/api/pipelines/lease":
+                    self._reply(
+                        {"ok": True, "data": {"model": payload["model"], "stages": [
+                            {"index": 1, "url": "http://b", "secret": "sB"},
+                            {"index": 0, "url": "http://a", "secret": "sA"},
+                        ]}}
+                    )
+                else:
+                    self._reply({"ok": False})
+
+        return H
+
+
+def _serve_exchange(ex):
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), ex.handler())
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
+
+
+def test_lease_pipeline_returns_endpoints_ordered_by_stage():
+    from party_line_harness.pipeline import driver
+
+    ex = _FakeExchange()
+    httpd, url = _serve_exchange(ex)
+    try:
+        endpoints = driver.lease_pipeline(url, "big-model", key="pl-abc")
+        # exchange returned stages out of order; the driver sorts by index
+        assert endpoints == [("http://a", "sA"), ("http://b", "sB")]
+        assert ex.auth[-1] == "Bearer pl-abc"
+    finally:
+        httpd.shutdown()
+
+
+def test_shard_catalog_registers_stage_model_and_key():
+    from party_line_harness.pipeline.serve_shard import ShardCatalog
+
+    ex = _FakeExchange()
+    httpd, url = _serve_exchange(ex)
+    try:
+        cat = ShardCatalog(url, "big-model", 1, 2, "http://me.ts.net", "sekret", key="pl-xyz", name="closet")
+        assert cat.register() is True
+        assert cat.host_id == "sh0" and cat.ttl_seconds == 45
+        sent = ex.registered[-1]
+        assert sent["model"] == "big-model" and sent["index"] == 1 and sent["count"] == 2
+        assert sent["url"] == "http://me.ts.net" and sent["secret"] == "sekret"
+        assert ex.auth[-1] == "Bearer pl-xyz"
+    finally:
+        httpd.shutdown()
+
+
 # ── serve-shard HTTP surface (fake stage, no model) ─────────────────────────
 
 

@@ -572,6 +572,11 @@ scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
 machine B:  party-line-harness serve-shard --model &lt;id&gt; --stage 1/2   # layers 16–31 + norm + lm_head
 driver:     party-line-harness pipeline-run --model &lt;id&gt; \
               --stage http://A=secretA,http://B=secretB --prompt "why do cats knead?"</code></pre>
+  <p>Give each <code>serve-shard</code> a <code>--server</code> + <code>--exchange-key</code> and it
+     registers its slice with the exchange's pipeline catalog; a driver then leases the assembled
+     pipeline by name (<code>pipeline-run --server … --exchange-key … --model …</code>) instead of
+     naming shards by hand. The exchange assembles and leases; the driver runs the generation, so the
+     server never touches the model.</p>
   <ul>
     <li><strong>Only hidden states cross the wire.</strong> Shard 0 embeds the token(s) and runs its
       layer block, then ships the hidden state <code>[batch, seq, hidden]</code> to shard 1, which runs

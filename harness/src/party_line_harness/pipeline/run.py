@@ -5,8 +5,14 @@
       --prompt "why do cats knead?"
 
 Stages are given in pipeline order as ``url=secret`` (secret optional for a
-localhost shard). The driver holds only the tokenizer; the shards hold the
-weights.
+localhost shard). Or lease an assembled pipeline from the exchange instead of
+naming shards by hand:
+
+    party-line-harness pipeline-run --model <id> \\
+      --server http://exchange:4000 --exchange-key pl-… \\
+      --prompt "why do cats knead?"
+
+The driver holds only the tokenizer; the shards hold the weights.
 """
 
 from __future__ import annotations
@@ -36,7 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="drive a prompt across a chain of serve-shard daemons",
     )
     parser.add_argument("--model", required=True, help="mlx-community model id (the shards' model)")
-    parser.add_argument("--stage", required=True, help="ordered url=secret list, comma-separated")
+    parser.add_argument("--stage", default=None, help="ordered url=secret list, comma-separated (or lease from --server)")
+    parser.add_argument("--server", default=None, help="party-line exchange to lease a pipeline from")
+    parser.add_argument("--exchange-key", default=None, help="pl-… key for the lease request")
     parser.add_argument("--prompt", required=True, help="the user turn")
     parser.add_argument("--system", default=None, help="optional system prompt")
     parser.add_argument("--max-tokens", type=int, default=128)
@@ -53,9 +61,18 @@ def main(argv: list[str] | None = None) -> int:
         messages.append({"role": "system", "content": args.system})
     messages.append({"role": "user", "content": args.prompt})
 
+    if args.stage:
+        endpoints = _parse_stages(args.stage)
+    elif args.server:
+        endpoints = driver.lease_pipeline(args.server, args.model, key=args.exchange_key)
+        if not endpoints:
+            raise SystemExit(f"no complete pipeline for {args.model} on {args.server}")
+    else:
+        raise SystemExit("give --stage url=secret,… or --server <exchange> to lease a pipeline")
+
     tokenizer = driver.load_tokenizer(args.model)
     prompt_ids = driver.encode_prompt(tokenizer, messages)
-    transport = driver.HttpTransport(_parse_stages(args.stage))
+    transport = driver.HttpTransport(endpoints)
 
     detok = tokenizer.detokenizer
     detok.reset()

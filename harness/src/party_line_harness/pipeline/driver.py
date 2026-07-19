@@ -118,6 +118,24 @@ class HttpTransport:
         self._client.close()
 
 
+def lease_pipeline(server: str, model: str, *, key: str | None, timeout: float = 10.0):
+    """Ask the exchange to lease a ready pipeline for ``model``: the ordered
+    ``[(url, secret)]`` its shards live at. Raises on an incomplete pipeline
+    (404) or auth failure."""
+    import httpx
+
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    resp = httpx.post(
+        f"{server.rstrip('/')}/api/pipelines/lease",
+        json={"model": model},
+        headers=headers,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    stages = ((resp.json() or {}).get("data") or {}).get("stages") or []
+    return [(s["url"], s["secret"]) for s in sorted(stages, key=lambda s: s["index"])]
+
+
 def generate(
     transport: Transport,
     prompt_ids: list[int],

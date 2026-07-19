@@ -242,14 +242,20 @@ uv run party-line-harness serve-llm --server http://<exchange>:4000
 ```
 
 Too big for one machine? Split it across two — each host runs part of the
-layers, the hidden state passes between them:
+layers, the hidden state passes between them. Register the shards with the
+exchange and it assembles the pipeline; a driver leases it by name:
 
 ```bash
-# machine A                                    # machine B
-serve-shard --model <id> --stage 0/2           serve-shard --model <id> --stage 1/2
-# then drive it:
-pipeline-run --model <id> --stage http://A=secretA,http://B=secretB --prompt "…"
+# machine A                                          # machine B
+serve-shard --model <id> --stage 0/2 \               serve-shard --model <id> --stage 1/2 \
+  --server http://<exchange>:4000 --exchange-key pl-…   --server http://<exchange>:4000 --exchange-key pl-…
+
+# drive it by leasing the assembled pipeline (no need to name shards by hand):
+pipeline-run --model <id> --server http://<exchange>:4000 --exchange-key pl-… --prompt "…"
 ```
+
+Or skip the exchange and wire the shards directly:
+`pipeline-run --model <id> --stage http://A=secretA,http://B=secretB --prompt "…"`.
 
 The [host page](docs/screenshots/host.png) walks through everything, operator
 to operator.

@@ -16,6 +16,9 @@
   model** — it catalogs, assembles, and leases; the driver stays in the harness.
 - The SSRF url guard is now one shared `PartyLine.PublicUrl` (used by both the
   host and shard catalogs).
+- Harness side: `serve-shard --server … --exchange-key pl-…` registers its
+  shard and heartbeats (deregistering on exit); `pipeline-run --server … --model
+  …` leases the assembled pipeline by name instead of naming shards by hand.
 
 ### Pipeline-parallel split inference (part of the model per machine)
 - A model too big for one host now runs **split across machines**. Its
