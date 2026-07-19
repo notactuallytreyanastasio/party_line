@@ -29,7 +29,9 @@ defmodule PartyLineWeb.PipelineControllerTest do
   test "register returns 201 with the id/ttl envelope", %{conn: conn, token: token} do
     conn = conn |> authed(token) |> post(~p"/api/pipelines/register", @shard)
 
-    assert %{"ok" => true, "data" => %{"id" => id, "ttl_seconds" => ttl}} = json_response(conn, 201)
+    assert %{"ok" => true, "data" => %{"id" => id, "ttl_seconds" => ttl}} =
+             json_response(conn, 201)
+
     assert id =~ ~r/\A[0-9a-f]{16}\z/
     assert is_integer(ttl) and ttl > 0
   end
@@ -42,7 +44,10 @@ defmodule PartyLineWeb.PipelineControllerTest do
   test "index assembles pipelines and never leaks addresses", %{conn: conn, token: token} do
     {:ok, _key, other} = Keys.mint("did:plc:bob", "serve-shard")
     conn |> authed(token) |> post(~p"/api/pipelines/register", @shard)
-    conn |> authed(other) |> post(~p"/api/pipelines/register", %{@shard | "index" => 1, "secret" => "sk-b"})
+
+    conn
+    |> authed(other)
+    |> post(~p"/api/pipelines/register", %{@shard | "index" => 1, "secret" => "sk-b"})
 
     conn = get(build_conn(), ~p"/api/pipelines")
     assert %{"ok" => true, "data" => %{"pipelines" => [p]}} = json_response(conn, 200)

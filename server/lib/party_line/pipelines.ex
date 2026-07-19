@@ -249,7 +249,12 @@ defmodule PartyLine.Pipelines do
       stages =
         for i <- 0..(count - 1) do
           e = by_index[i]
-          %{index: i, url: e.url, token: lease_token(e.secret, e.model, e.count, e.index, expires_at)}
+
+          %{
+            index: i,
+            url: e.url,
+            token: lease_token(e.secret, e.model, e.count, e.index, expires_at)
+          }
         end
 
       %{expires_at: expires_at, stages: stages}
@@ -272,14 +277,21 @@ defmodule PartyLine.Pipelines do
   # The public projection: a caller sees which slices exist, never how to reach
   # them. A pipeline is reached by leasing it, not by a shard's address.
   defp public(e),
-    do: %{model: e.model, index: e.index, count: e.count, name: e.name, last_seen_at: e.last_seen_at}
+    do: %{
+      model: e.model,
+      index: e.index,
+      count: e.count,
+      name: e.name,
+      last_seen_at: e.last_seen_at
+    }
 
   defp validate(attrs) do
     with {:ok, model} <- validate_model(fetch(attrs, :model)),
          {:ok, index, count} <- validate_stage(fetch(attrs, :index), fetch(attrs, :count)),
          {:ok, url} <- PublicUrl.validate(fetch(attrs, :url)),
          {:ok, secret} <- validate_secret(fetch(attrs, :secret)) do
-      {:ok, %{model: model, index: index, count: count, url: url, secret: secret, name: name(attrs)}}
+      {:ok,
+       %{model: model, index: index, count: count, url: url, secret: secret, name: name(attrs)}}
     end
   end
 

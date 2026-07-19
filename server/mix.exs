@@ -13,6 +13,9 @@ defmodule PartyLine.MixProject do
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader],
       compile_options: [:debug_info],
+      # A compiler warning is a build failure, everywhere — no warning ever
+      # rides along in a green build (`mix check` and CI already assumed this).
+      elixirc_options: [warnings_as_errors: true],
       # Assay (incremental Dialyzer) configuration. Analyze the project plus its
       # deps for accurate success typing, but only surface warnings for our code.
       assay: [

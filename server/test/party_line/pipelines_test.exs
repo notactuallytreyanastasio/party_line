@@ -45,7 +45,8 @@ defmodule PartyLine.PipelinesTest do
     end
 
     test "rejects a reserved model id", %{pid: pid} do
-      assert {:error, :reserved_name} = Pipelines.register(pid, @a, shard("party-line-auto", 0, 2))
+      assert {:error, :reserved_name} =
+               Pipelines.register(pid, @a, shard("party-line-auto", 0, 2))
     end
 
     test "a different owner can't claim a live slot", %{pid: pid} do
@@ -56,7 +57,14 @@ defmodule PartyLine.PipelinesTest do
     end
 
     test "string-keyed params (JSON) and string ints are accepted", %{pid: pid} do
-      params = %{"model" => "m", "index" => "1", "count" => "2", "url" => "http://x.ts.net", "secret" => "s"}
+      params = %{
+        "model" => "m",
+        "index" => "1",
+        "count" => "2",
+        "url" => "http://x.ts.net",
+        "secret" => "s"
+      }
+
       assert {:ok, _} = Pipelines.register(pid, @a, params)
     end
   end
@@ -74,10 +82,14 @@ defmodule PartyLine.PipelinesTest do
   describe "pipelines — assembly" do
     test "a model is ready only when every stage is present", %{pid: pid} do
       {:ok, _} = Pipelines.register(pid, @a, shard("big", 0, 2))
-      assert [%{model: "big", count: 2, stages_present: 1, ready: false}] = Pipelines.pipelines(pid)
+
+      assert [%{model: "big", count: 2, stages_present: 1, ready: false}] =
+               Pipelines.pipelines(pid)
 
       {:ok, _} = Pipelines.register(pid, @b, shard("big", 1, 2))
-      assert [%{model: "big", count: 2, stages_present: 2, ready: true}] = Pipelines.pipelines(pid)
+
+      assert [%{model: "big", count: 2, stages_present: 2, ready: true}] =
+               Pipelines.pipelines(pid)
     end
 
     test "separate {model,count} groups are assembled independently", %{pid: pid} do
@@ -93,8 +105,11 @@ defmodule PartyLine.PipelinesTest do
 
   describe "lease" do
     test "returns ordered endpoints with HMAC tokens — never a secret", %{pid: pid} do
-      {:ok, _} = Pipelines.register(pid, @a, shard("big", 0, 2, url: "http://a.ts.net", secret: "sA"))
-      {:ok, _} = Pipelines.register(pid, @b, shard("big", 1, 2, url: "http://b.ts.net", secret: "sB"))
+      {:ok, _} =
+        Pipelines.register(pid, @a, shard("big", 0, 2, url: "http://a.ts.net", secret: "sA"))
+
+      {:ok, _} =
+        Pipelines.register(pid, @b, shard("big", 1, 2, url: "http://b.ts.net", secret: "sB"))
 
       assert %{expires_at: expires_at, stages: [s0, s1]} = Pipelines.lease(pid, "big")
       assert %{index: 0, url: "http://a.ts.net", token: t0} = s0
@@ -138,8 +153,12 @@ defmodule PartyLine.PipelinesTest do
     test "a restarted shard's NEW registration wins its slot", %{pid: pid} do
       # the daemon restarts: its dead predecessor is still inside the TTL, but
       # the fresh registration must be the one leased — the old secret is stale
-      {:ok, _} = Pipelines.register(pid, @a, shard("m", 0, 2, url: "http://old.ts.net", secret: "sk-old"))
-      {:ok, _} = Pipelines.register(pid, @a, shard("m", 0, 2, url: "http://new.ts.net", secret: "sk-new"))
+      {:ok, _} =
+        Pipelines.register(pid, @a, shard("m", 0, 2, url: "http://old.ts.net", secret: "sk-old"))
+
+      {:ok, _} =
+        Pipelines.register(pid, @a, shard("m", 0, 2, url: "http://new.ts.net", secret: "sk-new"))
+
       {:ok, _} = Pipelines.register(pid, @b, shard("m", 1, 2))
 
       assert %{expires_at: exp, stages: [%{index: 0, url: "http://new.ts.net", token: t0} | _]} =
