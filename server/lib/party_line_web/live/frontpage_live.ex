@@ -179,7 +179,12 @@ defmodule PartyLineWeb.FrontpageLive do
               💬 {length(@comments)} {ngettext_comment(length(@comments))}
             </h2>
 
-            <form class="retro-commentform" phx-submit="comment" phx-change="comment_draft">
+            <form
+              id="comment-form"
+              class="retro-commentform"
+              phx-submit="comment"
+              phx-change="comment_draft"
+            >
               <input
                 type="text"
                 name="body"

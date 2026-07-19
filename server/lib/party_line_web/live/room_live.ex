@@ -710,7 +710,12 @@ defmodule PartyLineWeb.RoomLive do
                 </div>
               </li>
             </ul>
-            <form phx-submit="dm_send" phx-change="dm_draft" class="retro-inputrow">
+            <form
+              id={"dm-form-#{:erlang.phash2(buddy)}"}
+              phx-submit="dm_send"
+              phx-change="dm_draft"
+              class="retro-inputrow"
+            >
               <input type="hidden" name="buddy" value={buddy} />
               <input
                 type="text"

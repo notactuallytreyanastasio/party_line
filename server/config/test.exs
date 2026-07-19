@@ -42,9 +42,11 @@ config :logger, level: :warning
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
 
-# Enable helpful, but potentially expensive runtime checks
+# Enable helpful, but potentially expensive runtime checks, and make a form
+# missing an id (broken form recovery) a hard failure instead of a warning.
 config :phoenix_live_view,
-  enable_expensive_runtime_checks: true
+  enable_expensive_runtime_checks: true,
+  test_warnings: [missing_form_id: :raise]
 
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,

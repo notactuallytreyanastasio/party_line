@@ -154,7 +154,7 @@ defmodule PartyLineWeb.AskLive do
           </div>
         </div>
 
-        <form class="retro-askform" phx-submit="ask" phx-change="draft">
+        <form id="ask-form" class="retro-askform" phx-submit="ask" phx-change="draft">
           <input
             type="text"
             name="body"
