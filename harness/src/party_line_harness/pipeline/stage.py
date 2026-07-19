@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 import inspect
+from collections import OrderedDict
 
 import numpy as np
 
@@ -86,10 +87,15 @@ class PipelineStage:
     """A loaded shard, ready to run its slice of the forward pass.
 
     Stateful across a generation: KV caches accumulate per ``session`` id, so
-    ``reset(session)`` before a fresh prompt.
+    ``reset(session)`` before a fresh prompt. Sessions are capped at
+    ``max_sessions`` with least-recently-used eviction — KV caches are
+    gigabyte-scale, so a caller minting fresh session ids (or a driver that
+    died before cleanup) must not grow memory without bound.
     """
 
-    def __init__(self, model: Any, shard: Shard, *, layer_offset: int | None = None):
+    def __init__(
+        self, model: Any, shard: Shard, *, layer_offset: int | None = None, max_sessions: int = 8
+    ):
         # where this shard's layers begin in ``model.model.layers``: ``shard.start``
         # when the model is the whole thing (shared across in-process stages), or
         # 0 when the model has been pruned to just this shard (``load``).
@@ -109,7 +115,8 @@ class PipelineStage:
         self._sliding_window = getattr(self._inner, "sliding_window", None)
         self._has_sliding = any(getattr(l, "use_sliding", False) for l in self._layers)
         self._head = self._resolve_head(model)
-        self._caches: dict[str, list] = {}
+        self._max_sessions = max_sessions
+        self._caches: OrderedDict[str, list] = OrderedDict()
 
     @classmethod
     def load(cls, model_id: str, stage_spec: str) -> "PipelineStage":
@@ -161,11 +168,16 @@ class PipelineStage:
     def _cache_for(self, session: str) -> list:
         cache = self._caches.get(session)
         if cache is None:
+            # evict the least-recently-used session before admitting a new one
+            if len(self._caches) >= self._max_sessions:
+                self._caches.popitem(last=False)
             # the model builds the right cache type per layer (rotating for
             # sliding layers, plain KV otherwise); take just this shard's slice.
             lo, hi = self._cache_range
             cache = self.model.make_cache()[lo:hi]
             self._caches[session] = cache
+        else:
+            self._caches.move_to_end(session)
         return cache
 
     def step(

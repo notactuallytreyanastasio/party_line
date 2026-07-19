@@ -333,12 +333,20 @@ def main(argv: list[str] | None = None) -> int:
     catalog = None
     hb_stop = threading.Event()
     if args.server and args.exchange_key:
-        catalog = ShardCatalog(
-            args.server, args.model, stage.shard.index, stage.shard.count,
-            public_url, token, key=args.exchange_key, name=args.name,
-        )
-        catalog.register()
-        threading.Thread(target=_heartbeat_loop, args=(catalog, hb_stop), daemon=True).start()
+        if stage.shard.count < 2:
+            # an "a:b" layer-range shard is a lone 0/1 stage — the catalog only
+            # assembles i/n splits, so registering it would just 422
+            log.warning(
+                "--stage a:b shards can't be cataloged (the exchange assembles i/n splits); "
+                "serving without registering"
+            )
+        else:
+            catalog = ShardCatalog(
+                args.server, args.model, stage.shard.index, stage.shard.count,
+                public_url, token, key=args.exchange_key, name=args.name,
+            )
+            catalog.register()
+            threading.Thread(target=_heartbeat_loop, args=(catalog, hb_stop), daemon=True).start()
     elif args.server:
         log.warning("no --exchange-key: serving locally but NOT registering (registration is identity-bound)")
 

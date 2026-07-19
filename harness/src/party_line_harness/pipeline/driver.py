@@ -161,27 +161,36 @@ def generate(
 
     out: list[int] = []
     step_tokens: list[int] | None = list(prompt_ids)
-    for _ in range(max_tokens):
-        payload: Any = None
-        for stage in range(n):
-            want = "token" if stage == n - 1 else "hidden"
-            kind, payload = transport.call(
-                stage,
-                session,
-                tokens=step_tokens if stage == 0 else None,
-                hidden=None if stage == 0 else payload,
-                want=want,
-                sample=sample,
-                temperature=temperature,
-                top_p=top_p,
-            )
-        token = int(payload)
-        if token in eos:
-            break
-        out.append(token)
-        if on_token is not None:
-            on_token(token)
-        step_tokens = [token]
+    try:
+        for _ in range(max_tokens):
+            payload: Any = None
+            for stage in range(n):
+                want = "token" if stage == n - 1 else "hidden"
+                kind, payload = transport.call(
+                    stage,
+                    session,
+                    tokens=step_tokens if stage == 0 else None,
+                    hidden=None if stage == 0 else payload,
+                    want=want,
+                    sample=sample,
+                    temperature=temperature,
+                    top_p=top_p,
+                )
+            token = int(payload)
+            if token in eos:
+                break
+            out.append(token)
+            if on_token is not None:
+                on_token(token)
+            step_tokens = [token]
+    finally:
+        # free the session's KV caches on every stage — best-effort, since a
+        # stage that just died would otherwise mask the real error (the shards'
+        # own LRU eviction is the backstop for sessions we fail to clear).
+        try:
+            transport.reset(session)
+        except Exception:  # noqa: BLE001 - cleanup must never shadow the result
+            pass
     return out
 
 

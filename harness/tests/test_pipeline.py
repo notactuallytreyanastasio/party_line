@@ -141,7 +141,8 @@ def test_driver_walks_stages_in_order_and_feeds_hidden_forward():
     assert out == [11]
     # exactly one pass over all three stages, in order, last wanting a token
     assert t.calls == [(0, "hidden", "tok"), (1, "hidden", "hid"), (2, "token", "hid")]
-    assert t.resets == ["s0"]
+    # reset at the start (fresh caches) AND the end (free the session's KV)
+    assert t.resets == ["s0", "s0"]
 
 
 def test_driver_feeds_each_token_back_into_stage_zero():
@@ -351,8 +352,14 @@ class _MatformerLayer:
 
 
 def _fake_model(layers, n_caches, *, nested=False):
-    trunk = type("Trunk", (), {"layers": list(layers)})()
-    attrs = {"model_type": "faketron", "make_cache": lambda self: [object()] * n_caches}
+    class _W:
+        dtype = "f32"
+
+    trunk = type("Trunk", (), {})()
+    trunk.layers = list(layers)
+    trunk.norm = type("N", (), {"weight": _W()})()
+    trunk.embed_tokens = type("E", (), {"weight": _W(), "as_linear": staticmethod(lambda x: x)})()
+    attrs = {"model_type": "faketron", "make_cache": lambda self: [object() for _ in range(n_caches)]}
     attrs["language_model" if nested else "model"] = (
         type("LM", (), {"model": trunk})() if nested else trunk
     )
@@ -397,6 +404,48 @@ def test_guard_rejects_per_layer_inputs():
     model, trunk = _fake_model([_MatformerLayer() for _ in range(8)], 8)
     with pytest.raises(ValueError, match="extra inputs"):
         _assert_splittable(model, trunk)
+
+
+def test_stage_evicts_least_recently_used_session_beyond_cap():
+    from party_line_harness.pipeline.stage import PipelineStage
+
+    model, _ = _fake_model([_GoodLayer() for _ in range(4)], 4)
+    st = PipelineStage(model, Shard(start=0, end=3, n_layers=4, index=0, count=1), max_sessions=2)
+
+    a = st._cache_for("a")
+    st._cache_for("b")
+    assert st._cache_for("a") is a  # touching refreshes recency, same cache back
+    st._cache_for("c")  # cap is 2 → evicts "b", the least recently used
+
+    assert "b" not in st._caches
+    assert "a" in st._caches and "c" in st._caches
+
+
+def test_driver_generates_over_http_transport_end_to_end():
+    """The full loop, model-free: driver.generate → HttpTransport → real
+    sockets → two secret-gated ShardHosts. The same wiring pipeline-run uses."""
+    from party_line_harness.pipeline.serve_shard import ShardHost
+
+    stage0, stage1 = FakeStage(), FakeStage()
+    h0 = ShardHost(stage0, "m", token="sek0")
+    h1 = ShardHost(stage1, "m", token="sek1")
+    d0, p0 = _serve(h0)
+    d1, p1 = _serve(h1)
+    transport = None
+    try:
+        transport = driver.HttpTransport(
+            [(f"http://127.0.0.1:{p0}", "sek0"), (f"http://127.0.0.1:{p1}", "sek1")]
+        )
+        out = driver.generate(transport, [5, 6], max_tokens=3, session="e2e")
+        assert out == [123, 123, 123]  # FakeStage's last stage always samples 123
+        # both shards saw the session reset at start AND cleanup at end
+        assert stage0.reset_calls == ["e2e", "e2e"]
+        assert stage1.reset_calls == ["e2e", "e2e"]
+    finally:
+        if transport is not None:
+            transport.close()
+        d0.shutdown()
+        d1.shutdown()
 
 
 def test_serve_shard_forward_and_reset_and_health():

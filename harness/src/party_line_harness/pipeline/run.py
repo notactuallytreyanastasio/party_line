@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import uuid
 
 from . import driver
 
@@ -88,6 +89,9 @@ def main(argv: list[str] | None = None) -> int:
             prompt_ids,
             max_tokens=args.max_tokens,
             eos_ids=driver.eos_token_ids(tokenizer),
+            # a unique session per run: two drivers sharing the same shards must
+            # never collide on KV caches (the default "s0" would clobber both)
+            session=f"run-{uuid.uuid4().hex[:12]}",
             sample=args.temperature > 0,
             temperature=args.temperature,
             top_p=args.top_p,

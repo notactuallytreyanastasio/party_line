@@ -32,6 +32,11 @@
 - Harness side: `serve-shard --server … --exchange-key pl-…` registers its
   shard and heartbeats (deregistering on exit); `pipeline-run --server … --model
   …` leases the assembled pipeline by name instead of naming shards by hand.
+- **Session hygiene** (audit): every `pipeline-run` now uses a unique session id
+  (two drivers sharing shards used to collide on `"s0"` and clobber each other's
+  KV mid-generation); the driver frees its session's caches on every stage when
+  it finishes; and shards cap live sessions at 8 with LRU eviction, so KV memory
+  is bounded even when a driver dies before cleanup.
 
 ### Pipeline-parallel split inference (part of the model per machine)
 - A model too big for one host now runs **split across machines**. Its
