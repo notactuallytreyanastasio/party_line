@@ -28,6 +28,13 @@
   with the whole model and again through 2- and 3-way splits *and* the real
   partial-load split, asserting the token ids match exactly — a correct split is
   bit-for-bit the whole model.
+- **Splittability guard.** Only plain decoder stacks (Llama/Qwen/Mistral/Phi)
+  split cleanly. Matformer / shared-KV models — `gemma-4-e4b` feeds per-layer
+  embeddings into every layer and shares KV across layers (24 caches for 42) —
+  can't be split this way, so the loader detects them (cache-count ≠ layer-count,
+  or a layer that takes per-layer inputs) and refuses with a clear reason instead
+  of emitting garbage. Trunk discovery also handles the multimodal wrapper
+  (`model.language_model.model`).
 
 ## v0.2.0 — "the on-ramp" (2026-07-18)
 

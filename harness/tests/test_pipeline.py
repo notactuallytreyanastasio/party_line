@@ -224,6 +224,68 @@ def test_serve_shard_requires_the_secret():
         httpd.shutdown()
 
 
+# ── splittability guard (fake models, no MLX) ───────────────────────────────
+
+
+class _GoodLayer:
+    def __call__(self, x, mask=None, cache=None):
+        return x
+
+
+class _MatformerLayer:
+    def __call__(self, x, mask=None, cache=None, per_layer_input=None, shared_kv=None):
+        return x
+
+
+def _fake_model(layers, n_caches, *, nested=False):
+    trunk = type("Trunk", (), {"layers": list(layers)})()
+    attrs = {"model_type": "faketron", "make_cache": lambda self: [object()] * n_caches}
+    attrs["language_model" if nested else "model"] = (
+        type("LM", (), {"model": trunk})() if nested else trunk
+    )
+    return type("Model", (), attrs)(), trunk
+
+
+def test_trunk_finds_flat_and_nested_trunks():
+    from party_line_harness.pipeline.stage import _trunk
+
+    flat, trunk = _fake_model([_GoodLayer()], 1)
+    assert _trunk(flat) is trunk
+    nested, trunk2 = _fake_model([_GoodLayer()], 1, nested=True)
+    assert _trunk(nested) is trunk2
+
+
+def test_trunk_rejects_a_model_with_no_decoder_trunk():
+    from party_line_harness.pipeline.stage import _trunk
+
+    with pytest.raises(ValueError):
+        _trunk(type("X", (), {})())
+
+
+def test_guard_accepts_a_plain_decoder_stack():
+    from party_line_harness.pipeline.stage import _assert_splittable
+
+    model, trunk = _fake_model([_GoodLayer() for _ in range(8)], 8)
+    _assert_splittable(model, trunk)  # one cache per layer, plain forward → ok
+
+
+def test_guard_rejects_shared_kv_matformer():
+    from party_line_harness.pipeline.stage import _assert_splittable
+
+    # gemma-4-e4b shape: fewer caches than layers (shared KV across layers)
+    model, trunk = _fake_model([_GoodLayer() for _ in range(42)], 24)
+    with pytest.raises(ValueError, match="shares KV"):
+        _assert_splittable(model, trunk)
+
+
+def test_guard_rejects_per_layer_inputs():
+    from party_line_harness.pipeline.stage import _assert_splittable
+
+    model, trunk = _fake_model([_MatformerLayer() for _ in range(8)], 8)
+    with pytest.raises(ValueError, match="extra inputs"):
+        _assert_splittable(model, trunk)
+
+
 def test_serve_shard_forward_and_reset_and_health():
     import httpx
 

@@ -582,6 +582,13 @@ driver:     party-line-harness pipeline-run --model &lt;id&gt; \
       whole model and again through a 2- and 3-way in-process split <em>and</em> the real partial-load
       split, asserting the token ids match <em>exactly</em> — a correct split is bit-for-bit identical
       to the whole model, so any drift is a bug.</li>
+    <li><strong>Plain decoder stacks only, and it says so.</strong> A contiguous layer split needs
+      each layer to run from just the hidden state + its own KV cache. Some models don't qualify:
+      <code>gemma-4-e4b</code> is a matformer that feeds per-layer embeddings into every layer and
+      <em>shares</em> KV across layers (24 caches for 42 layers), so a downstream shard would need the
+      original embeddings and a neighbour's keys. The loader detects this (cache-count ≠ layer-count,
+      or a layer forward that takes per-layer inputs) and <strong>refuses with a clear reason</strong>
+      rather than emit garbage. Llama/Qwen/Mistral/Phi-style stacks split cleanly.</li>
   </ul>
 </section>
 

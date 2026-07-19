@@ -22,18 +22,64 @@ from __future__ import annotations
 
 from typing import Any
 
+import inspect
+
 import numpy as np
 
 from .shard import Shard, parse_stage_spec
 
+# A splittable layer's forward is h = layer(x, mask, cache). Extra parameters mean
+# the layer needs information a pipeline shard can't provide in isolation — a
+# matformer's per-layer embeddings, or a key/value tensor shared with a layer that
+# may live on another shard. We refuse those rather than emit silent garbage.
+_LAYER_OK = {"self", "x", "mask", "cache", "inputs", "hidden_states", "h"}
+
 
 def _trunk(model: Any) -> Any:
     """The transformer trunk that holds ``embed_tokens`` / ``layers`` / ``norm``.
-    mlx-lm wraps it as ``model.model`` for the Llama/Qwen/Mistral/Gemma families."""
-    inner = getattr(model, "model", None)
-    if inner is None or not hasattr(inner, "layers"):
-        raise ValueError("unsupported model: no .model trunk with .layers")
-    return inner
+
+    mlx-lm wraps it as ``model.model`` for the Llama/Qwen/Mistral/Gemma-2 families,
+    and as ``model.language_model.model`` for the multimodal wrappers (gemma-3/4).
+    """
+    for path in ("model", "language_model.model"):
+        inner = model
+        for attr in path.split("."):
+            inner = getattr(inner, attr, None)
+        if inner is not None and hasattr(inner, "layers"):
+            return inner
+    raise ValueError("unsupported model: could not find a decoder trunk with .layers")
+
+
+def _assert_splittable(model: Any, trunk: Any) -> None:
+    """Refuse architectures a contiguous layer split can't run correctly.
+
+    Two signals catch the matformer / shared-KV designs (e.g. gemma-4-e4b):
+    every layer must own a KV cache (no cross-layer sharing), and its forward
+    must be the plain ``layer(x, mask, cache)`` — no per-layer inputs. A model
+    that fails either would produce garbage under a naive split, so we stop it at
+    load time with a clear reason instead.
+    """
+    layers = trunk.layers
+    try:
+        n_caches = len(model.make_cache())
+    except Exception:
+        n_caches = len(layers)
+    if n_caches != len(layers):
+        raise ValueError(
+            f"{_model_name(model)} shares KV across layers ({n_caches} caches for "
+            f"{len(layers)} layers) — a pipeline split needs one cache per layer, so it "
+            "can't be split cleanly across machines"
+        )
+    extra = set(inspect.signature(layers[0].__call__).parameters) - _LAYER_OK
+    if extra:
+        raise ValueError(
+            f"{_model_name(model)} layers take extra inputs {sorted(extra)} (per-layer "
+            "embeddings or shared KV) — a pipeline split supports plain decoder stacks only"
+        )
+
+
+def _model_name(model: Any) -> str:
+    return getattr(model, "model_type", None) or model.__class__.__module__.rsplit(".", 1)[-1]
 
 
 class PipelineStage:
@@ -51,6 +97,7 @@ class PipelineStage:
         self.model = model
         self.shard = shard
         self._inner = _trunk(model)
+        _assert_splittable(model, self._inner)
         self._cache_range = (offset, offset + shard.n_local)
         self._layers = list(self._inner.layers)[offset : offset + shard.n_local]
         # the *activation* dtype (fp16/bf16), read off the final RMSNorm weight —
@@ -81,6 +128,7 @@ class PipelineStage:
 
         model, _ = load(model_id, lazy=True)
         inner = _trunk(model)
+        _assert_splittable(model, inner)  # refuse matformer / shared-KV models up front
         shard = parse_stage_spec(stage_spec, len(inner.layers))
 
         # drop references to the layers this shard doesn't run; the pruned model's
