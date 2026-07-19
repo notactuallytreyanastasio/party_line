@@ -54,6 +54,9 @@ class ShardHost:
         self.stage = stage
         self.model_id = model_id
         self.token = token
+        # per-session forward counters: the driver's request id is the session
+        # id, so this shard's log lines correlate with every other machine's
+        self._sessions: dict[str, int] = {}
         from concurrent.futures import ThreadPoolExecutor
 
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-shard")
@@ -65,6 +68,7 @@ class ShardHost:
         host = cls.__new__(cls)
         host.model_id = model_id
         host.token = token
+        host._sessions = {}
         from concurrent.futures import ThreadPoolExecutor
 
         host._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-shard")
@@ -114,9 +118,12 @@ class ShardHost:
         return hmac.compare_digest(want, parts[2])
 
     def forward(self, header: dict[str, Any], tensor) -> bytes:
+        import time
+
         session = str(header.get("session", "s0"))
         want = header.get("want", "hidden")
         tokens = header.get("tokens")
+        started = time.monotonic()
         kind, payload = self._submit(
             self.stage.step,
             session,
@@ -127,12 +134,32 @@ class ShardHost:
             temperature=float(header.get("temperature", 0.7)),
             top_p=float(header.get("top_p", 0.95)),
         )
+        ms = (time.monotonic() - started) * 1000
+
+        # narrate the lifecycle: the prefill announces a question arriving at
+        # THIS slice of the model; then a heartbeat line every 16 forwards so
+        # the flow stays visible without a line per token
+        n = self._sessions.get(session, 0) + 1
+        self._sessions[session] = n
+        if tokens is not None and len(tokens) > 1:
+            log.info("%s: prefill %d tokens through %s (%.0fms)",
+                     session, len(tokens), self.stage.shard.label, ms)
+        elif n % 8 == 0:
+            log.info("%s: %d forwards through %s (~%.0fms/step)",
+                     session, n, self.stage.shard.label, ms)
+        if len(self._sessions) > 64:  # forgotten sessions must not accumulate
+            self._sessions.pop(next(iter(self._sessions)))
+
         if kind == "token":
             return wire.encode_frame({"kind": "token", "token": int(payload)})
         return wire.encode_frame({"kind": "hidden"}, payload)
 
     def reset(self, header: dict[str, Any]) -> bytes:
-        self._submit(self.stage.reset, str(header.get("session", "s0")))
+        session = str(header.get("session", "s0"))
+        self._submit(self.stage.reset, session)
+        n = self._sessions.pop(session, 0)
+        if n:
+            log.info("%s: done — %d forwards served by %s", session, n, self.stage.shard.label)
         return wire.encode_frame({"kind": "ok"})
 
 

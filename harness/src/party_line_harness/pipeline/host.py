@@ -121,36 +121,62 @@ class PipelineChat:
         max_tokens = int(payload.get("max_tokens") or 512)
         temperature = float(payload.get("temperature", 0.7))
 
-        detok = self.tokenizer.detokenizer if on_text is not None else None
+        # one id follows the question everywhere: it is the shard session, so
+        # this same id shows up in every shard's log — grep it across machines
+        rid = f"chat-{uuid.uuid4().hex[:12]}"
+        norm = _norm_messages(messages)
+        asked = next((m["content"] for m in reversed(norm) if m["role"] == "user"), "")
+
+        # the lifecycle narration: both modes drive the streaming detokenizer,
+        # so the log shows the answer landing typewriter-style either way
+        detok = self.tokenizer.detokenizer
         pieces: list[str] = []
+        unlogged: list[str] = []
+        n_tok = 0
+
+        def flush_log() -> None:
+            if unlogged:
+                log.info("%s ▸ %s", rid, "".join(unlogged).strip() or "…")
+                unlogged.clear()
 
         def stream_token(tid: int) -> None:
+            nonlocal n_tok
+            n_tok += 1
             detok.add_token(tid)
             piece = detok.last_segment
             if piece:
                 pieces.append(piece)
-                on_text(piece)
+                unlogged.append(piece)
+                if on_text is not None:
+                    on_text(piece)
+                if len(unlogged) >= 8:
+                    flush_log()
 
+        started = time.time()
         with self._lock:
-            prompt_ids = driver.encode_prompt(self.tokenizer, _norm_messages(messages))
+            prompt_ids = driver.encode_prompt(self.tokenizer, norm)
+            log.info('q %s: "%s" (%d prompt tokens)', rid, asked[:70], len(prompt_ids))
             for attempt in (1, 2):
                 transport = self._ensure_lease()
-                if detok is not None:
-                    # retries restart from token zero — restart the stream state
-                    # too, or a healed retry would detokenize on stale context
-                    detok.reset()
-                    pieces.clear()
+                # retries restart from token zero — restart the stream state
+                # too, or a healed retry would detokenize on stale context
+                detok.reset()
+                pieces.clear()
+                unlogged.clear()
+                n_tok = 0
+                started = time.time()
                 try:
-                    out = driver.generate(
+                    driver.generate(
                         transport,
                         prompt_ids,
                         max_tokens=max_tokens,
                         eos_ids=self._eos,
-                        # unique per request: KV on the shards must never collide
-                        session=f"chat-{uuid.uuid4().hex[:12]}",
+                        # the request id IS the session: KV on the shards must
+                        # never collide, and the logs correlate across machines
+                        session=rid,
                         sample=temperature > 0,
                         temperature=temperature,
-                        on_token=stream_token if detok is not None else None,
+                        on_token=stream_token,
                     )
                     break
                 except driver.StageError as exc:
@@ -158,13 +184,21 @@ class PipelineChat:
                     if attempt == 2:
                         raise
                     log.warning("%s — re-leasing and retrying once", exc)
-        if detok is None:
-            return driver.decode_tokens(self.tokenizer, out)
+            n_stages = transport.n_stages
+
         detok.finalize()
         tail = detok.last_segment
         if tail:
             pieces.append(tail)
-            on_text(tail)
+            unlogged.append(tail)
+            if on_text is not None:
+                on_text(tail)
+        flush_log()
+        elapsed = max(time.time() - started, 1e-6)
+        log.info(
+            "a %s: %d tokens in %.1fs (%.1f tok/s) across %d stages",
+            rid, n_tok, elapsed, n_tok / elapsed, n_stages,
+        )
         return "".join(pieces)
 
     def _invalidate(self) -> None:
@@ -370,6 +404,10 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(message)s",
         datefmt="%H:%M:%S",
     )
+    if not args.verbose:
+        # two "HTTP Request" lines per token would bury the lifecycle
+        # narration; the per-hop chatter comes back with -v
+        logging.getLogger("httpx").setLevel(logging.WARNING)
 
     token = args.llm_token or secrets.token_urlsafe(24)
     log.info("loading the tokenizer for %s (no weights on this machine)…", args.model)

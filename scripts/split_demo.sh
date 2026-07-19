@@ -19,6 +19,7 @@ LOGDIR="$(mktemp -d -t split_demo)"
 echo "▸ logs live in $LOGDIR"
 
 cleanup() {
+  [[ -n "${TAIL_PID:-}" ]] && kill "$TAIL_PID" 2>/dev/null || true
   [[ -n "${PIPELINE_PID:-}" ]] && kill "$PIPELINE_PID" 2>/dev/null || true
   [[ -n "${SHARD_A_PID:-}" ]] && kill "$SHARD_A_PID" 2>/dev/null || true
   [[ -n "${SHARD_B_PID:-}" ]] && kill "$SHARD_B_PID" 2>/dev/null || true
@@ -174,4 +175,20 @@ cat <<SUMMARY
 
 SUMMARY
 
-wait "$PIPELINE_PID"
+# ── the switchboard, live ───────────────────────────────────────────────────
+# every question narrates its own lifecycle: the exchange says who it patched
+# the call to, the pipeline host logs the question + the answer landing
+# typewriter-style, and each shard reports the prefill and forwards it served —
+# all under one chat-… id you can grep across every log.
+echo "☎ watching the switchboard — send the curl above from another terminal"
+echo "  and watch your question cross both halves of the model:"
+echo
+# backgrounded + waited so a TERM to this script still runs the trap promptly
+# (a foreground tail would defer it); Ctrl-C hits the whole group either way
+tail -n 0 -f \
+  "$LOGDIR/exchange.log" \
+  "$LOGDIR/pipeline-host.log" \
+  "$LOGDIR/shard-A.log" \
+  "$LOGDIR/shard-B.log" &
+TAIL_PID=$!
+wait "$TAIL_PID"

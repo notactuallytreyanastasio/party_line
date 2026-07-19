@@ -303,8 +303,15 @@ def test_shard_catalog_registers_stage_model_and_key():
 
 
 class _FakeDetok:
+    """Mirrors mlx's streaming contract: ``text`` grows as tokens land, and
+    ``last_segment`` returns (and consumes) the growth since the last read."""
+
+    def __init__(self):
+        self.reset()
+
     def reset(self):
         self._toks = []
+        self._read = 0
 
     def add_token(self, t):
         self._toks.append(t)
@@ -315,6 +322,12 @@ class _FakeDetok:
     @property
     def text(self):
         return " ".join(f"t{t}" for t in self._toks)
+
+    @property
+    def last_segment(self):
+        piece = self.text[self._read :]
+        self._read = len(self.text)
+        return piece
 
 
 class FakeTokenizer:

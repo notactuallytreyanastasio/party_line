@@ -14,6 +14,8 @@ defmodule PartyLineWeb.ChatCompletionsController do
   """
   use PartyLineWeb, :controller
 
+  require Logger
+
   alias PartyLine.API.{Chat, OpenAI}
   alias PartyLine.Hosts
 
@@ -66,6 +68,9 @@ defmodule PartyLineWeb.ChatCompletionsController do
   # non-streaming and re-emit as SSE if the caller wanted a stream (the host
   # never streams to us yet); the caller-facing shape is unchanged.
   defp proxy(conn, params, host) do
+    # the exchange's line in a question's lifecycle log: who we patched it to
+    Logger.info("completion → lent host #{inspect(host.name)} (#{host.model})")
+
     case host_proxy().chat(host, Map.put(params, "stream", false)) do
       {:ok, completion} ->
         # never reflect the host's raw response body — pull only the assistant
