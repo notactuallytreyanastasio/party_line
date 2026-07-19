@@ -12,6 +12,11 @@ defmodule PartyLine.PublicUrl do
 
   One source of truth, shared by every catalog that stores a caller-supplied
   URL (`Hosts`, `Pipelines`).
+
+  Dev only: `config :party_line, allow_private_urls: true` skips the private
+  checks (the scheme is still enforced), so the whole federation — exchange,
+  lent hosts, pipeline shards — can run on one laptop. Never set it where the
+  exchange faces callers you don't trust.
   """
 
   @doc "Returns `{:ok, url}` for a public http(s) URL, else `{:error, reason}`."
@@ -24,12 +29,15 @@ defmodule PartyLine.PublicUrl do
 
     cond do
       host == "" -> {:error, :invalid_url}
+      allow_private?() -> {:ok, url}
       host in ~w(localhost metadata.google.internal metadata) -> {:error, :private_url}
       String.ends_with?(host, [".local", ".internal"]) -> {:error, :private_url}
       private_ip?(host) -> {:error, :private_url}
       true -> {:ok, url}
     end
   end
+
+  defp allow_private?, do: Application.get_env(:party_line, :allow_private_urls, false)
 
   defp private_ip?(host) do
     host = host |> String.trim_leading("[") |> String.trim_trailing("]")

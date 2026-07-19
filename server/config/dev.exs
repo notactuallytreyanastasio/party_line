@@ -45,6 +45,10 @@ config :party_line, PartyLineWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :party_line, dev_routes: true
 
+# Dev only: let the host/shard catalogs accept loopback urls so the whole
+# federation — exchange, lent hosts, pipeline shards — runs on one laptop.
+config :party_line, allow_private_urls: true
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 
