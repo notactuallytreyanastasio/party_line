@@ -643,6 +643,60 @@ def test_guard_rejects_per_layer_inputs():
         _assert_splittable(model, trunk)
 
 
+def test_shard_weight_files_selects_only_the_shards_files():
+    from party_line_harness.pipeline.stage import shard_weight_files
+
+    # 4 layers over 3 files; embed up front, head+norm at the back
+    index = {"weight_map": {
+        "model.embed_tokens.weight": "f1.safetensors",
+        "model.layers.0.self_attn.q_proj.weight": "f1.safetensors",
+        "model.layers.1.self_attn.q_proj.weight": "f2.safetensors",
+        "model.layers.2.self_attn.q_proj.weight": "f2.safetensors",
+        "model.layers.3.self_attn.q_proj.weight": "f3.safetensors",
+        "model.norm.weight": "f3.safetensors",
+        "lm_head.weight": "f3.safetensors",
+    }}
+    first, last = partition_layers(4, 2)
+
+    # first shard: embed + layers 0-1 → f1, f2 — never the head's file
+    assert shard_weight_files(index, first) == ["f1.safetensors", "f2.safetensors"]
+    # last shard: layers 2-3 + norm + lm_head → f2, f3 — never the embed file...
+    assert shard_weight_files(index, last) == ["f2.safetensors", "f3.safetensors"]
+
+
+def test_shard_weight_files_tied_model_gives_the_head_the_embedding():
+    from party_line_harness.pipeline.stage import shard_weight_files
+
+    # no lm_head tensor: the embedding doubles as the head, so the LAST shard
+    # needs the embed file too
+    index = {"weight_map": {
+        "model.embed_tokens.weight": "f1.safetensors",
+        "model.layers.0.mlp.up_proj.weight": "f1.safetensors",
+        "model.layers.1.mlp.up_proj.weight": "f2.safetensors",
+        "model.norm.weight": "f2.safetensors",
+    }}
+    first, last = partition_layers(2, 2)
+
+    assert shard_weight_files(index, first) == ["f1.safetensors"]
+    assert shard_weight_files(index, last) == ["f1.safetensors", "f2.safetensors"]
+
+
+def test_shard_weight_files_unclassified_tensors_go_everywhere():
+    from party_line_harness.pipeline.stage import shard_weight_files
+
+    # rotary tables and other small unclassified tensors ride with every shard
+    index = {"weight_map": {
+        "model.rotary_emb.inv_freq": "extras.safetensors",
+        "model.layers.0.x.weight": "f1.safetensors",
+        "model.layers.1.x.weight": "f2.safetensors",
+        "lm_head.weight": "f2.safetensors",
+    }}
+    first, last = partition_layers(2, 2)
+
+    assert "extras.safetensors" in shard_weight_files(index, first)
+    assert "extras.safetensors" in shard_weight_files(index, last)
+
+
 def test_stage_evicts_least_recently_used_session_beyond_cap():
     from party_line_harness.pipeline.stage import PipelineStage
 

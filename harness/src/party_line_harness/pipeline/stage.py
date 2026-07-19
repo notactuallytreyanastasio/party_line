@@ -23,7 +23,10 @@ from __future__ import annotations
 from typing import Any
 
 import inspect
+import json
+import re
 from collections import OrderedDict
+from pathlib import Path
 
 import numpy as np
 
@@ -83,6 +86,45 @@ def _model_name(model: Any) -> str:
     return getattr(model, "model_type", None) or model.__class__.__module__.rsplit(".", 1)[-1]
 
 
+def shard_weight_files(index: dict, shard: Shard) -> list[str]:
+    """Which safetensors files hold this shard's tensors — pure selection over
+    a ``model.safetensors.index.json`` weight map, so a machine downloads only
+    the files its slice needs.
+
+    Layer tensors go to the shard whose range covers them; the embedding to the
+    first shard (and to the last, when the model ties it as the head); the head
+    and final norm to the last; small unclassified tensors (rotary tables and
+    the like) to everyone. File granularity means a file mixing two shards'
+    layers is fetched by both — the win shrinks as files grow, and a
+    single-file model has nothing to skip.
+    """
+    weight_map = index["weight_map"]
+    tied = not any("lm_head" in name for name in weight_map)
+    needed: set[str] = set()
+    for name, fname in weight_map.items():
+        if m := re.search(r"\.layers\.(\d+)\.", name):
+            if shard.start <= int(m.group(1)) <= shard.end:
+                needed.add(fname)
+        elif "embed_tokens" in name:
+            if shard.has_embed or (shard.has_head and tied):
+                needed.add(fname)
+        elif "lm_head" in name or ".norm." in name or name.endswith(".norm.weight"):
+            if shard.has_head:
+                needed.add(fname)
+        else:
+            needed.add(fname)
+    return sorted(needed)
+
+
+def _config_layers(config: dict) -> int:
+    n = config.get("num_hidden_layers") or (config.get("text_config") or {}).get(
+        "num_hidden_layers"
+    )
+    if not n:
+        raise ValueError("config.json has no num_hidden_layers — can't size the shard")
+    return int(n)
+
+
 class PipelineStage:
     """A loaded shard, ready to run its slice of the forward pass.
 
@@ -106,10 +148,10 @@ class PipelineStage:
         _assert_splittable(model, self._inner)
         self._cache_range = (offset, offset + shard.n_local)
         self._layers = list(self._inner.layers)[offset : offset + shard.n_local]
-        # the *activation* dtype (fp16/bf16), read off the final RMSNorm weight —
-        # NOT embed_tokens.weight, which on a quantized model is packed uint32
-        # and would corrupt a hidden state cast to it.
-        self._dtype = self._inner.norm.weight.dtype
+        # the *activation* dtype (fp16/bf16), read off the shard's OWN layers —
+        # NOT embed_tokens.weight (packed uint32 on a quantized model) and NOT
+        # the final norm (which only the head shard loads under partial fetch).
+        self._dtype = self._activation_dtype()
         # a sliding-window model (e.g. gemma) needs a second, windowed mask for
         # its sliding layers; a plain causal model leaves this off.
         self._sliding_window = getattr(self._inner, "sliding_window", None)
@@ -120,23 +162,49 @@ class PipelineStage:
 
     @classmethod
     def load(cls, model_id: str, stage_spec: str) -> "PipelineStage":
-        """Load **only this shard's weights**, so a machine holds a fraction of
-        the model, not the whole thing.
+        """Load **only this shard's weights** — a fraction of the RAM and, for
+        multi-file models, a fraction of the download and disk too.
 
-        The model is loaded lazily (weights are memory-mapped, nothing in RAM),
-        pruned to the shard's layers, and only the tensors this shard actually
-        runs are materialized: its layer block + the final norm, plus the token
-        embedding on the first shard and the lm_head on the last. Everything
-        else stays an un-evaluated mmap and never costs memory. Hosting layers
-        16–31 of an 8B costs ~1.3 GB, not the full ~4.5 GB.
+        The tiny json files come first, so the shard can be sized before any
+        weight moves; then only the safetensors files holding this shard's
+        tensors are fetched (`shard_weight_files`); then the skeleton is built
+        and whatever files are present are lazily memory-mapped —
+        ``strict=False`` tolerates the absent far-shard files, whose layers are
+        pruned away before anything could touch their unassigned weights. Only
+        the tensors this shard runs are materialized: its layer block, plus the
+        embedding on the first shard and the norm + lm_head on the last. A
+        stage never loads a tokenizer.
+
+        A single-file model (this 4-bit 8B ships as one ``model.safetensors``)
+        still fetches its whole file — the RAM stays fractional either way; the
+        disk win needs the multi-file packing that bigger models use.
         """
         import mlx.core as mx
-        from mlx_lm import load
+        from mlx_lm.utils import load_model
 
-        model, _ = load(model_id, lazy=True)
+        local = Path(model_id)
+        if local.exists():
+            path = local
+        else:
+            from huggingface_hub import snapshot_download
+
+            # jsons only: enough to size the shard without touching a weight
+            path = Path(snapshot_download(model_id, allow_patterns=["*.json"]))
+            config = json.loads((path / "config.json").read_text())
+            shard = parse_stage_spec(stage_spec, _config_layers(config))
+            index_file = path / "model.safetensors.index.json"
+            if index_file.exists():
+                files = shard_weight_files(json.loads(index_file.read_text()), shard)
+                snapshot_download(model_id, allow_patterns=["*.json", *files])
+            else:
+                snapshot_download(model_id, allow_patterns=["*.json", "*.safetensors"])
+
+        config = json.loads((path / "config.json").read_text())
+        shard = parse_stage_spec(stage_spec, _config_layers(config))
+
+        model, _config = load_model(path, lazy=True, strict=False)
         inner = _trunk(model)
         _assert_splittable(model, inner)  # refuse matformer / shared-KV models up front
-        shard = parse_stage_spec(stage_spec, len(inner.layers))
 
         # drop references to the layers this shard doesn't run; the pruned model's
         # layers are now 0-indexed, so the stage runs at layer_offset 0.
@@ -144,10 +212,10 @@ class PipelineStage:
 
         # materialize only what this shard touches — never the far endpoint.
         keep: list[Any] = [layer.parameters() for layer in inner.layers]
-        keep.append(inner.norm.parameters())
         if shard.has_embed:
             keep.append(inner.embed_tokens.parameters())
         if shard.has_head:
+            keep.append(inner.norm.parameters())
             head = getattr(model, "lm_head", None)
             keep.append((head if head is not None else inner.embed_tokens).parameters())
         mx.eval(keep)
@@ -161,6 +229,21 @@ class PipelineStage:
         if head is not None:
             return head
         return self._inner.embed_tokens.as_linear
+
+    def _activation_dtype(self):
+        """First floating-point weight in this shard's own layers (a quantized
+        layer's scales/norms are stored in the activation dtype). Falls back to
+        the trunk norm for stub models in tests."""
+        try:
+            import mlx.core as mx
+            from mlx.utils import tree_flatten
+
+            for _name, arr in tree_flatten(self._layers[0].parameters()):
+                if mx.issubdtype(arr.dtype, mx.floating):
+                    return arr.dtype
+        except Exception:  # noqa: BLE001 - stubs have no parameters()
+            pass
+        return self._inner.norm.weight.dtype
 
     def reset(self, session: str) -> None:
         self._caches.pop(session, None)
