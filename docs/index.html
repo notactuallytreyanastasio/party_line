@@ -600,7 +600,12 @@ driver:     party-line-harness pipeline-run --model &lt;id&gt; \
   <pre><code>caller ── pl-… key ──▶ exchange ── host secret ──▶ pipeline-host ──▶ shard A ──▶ shard B
         (atproto-keyed)            (host catalog)   (tokenizer only)   (layers 0–15) (16–31 + head)</code></pre>
   <p>Zero new server routes: the capstone is pure composition (pipeline lease × host catalog). The
-     host re-leases before its tokens expire and answers 503 while no complete pipeline is live.</p>
+     host re-leases before its tokens expire and answers 503 while no complete pipeline is live.
+     <strong>It also heals:</strong> a failed hop raises a stage-attributed error (never an anonymous
+     500), and one re-lease-and-retry follows — leases prefer the newest registration per slot, so a
+     shard that crashed and came back recovers with the caller seeing nothing but latency. A hop
+     still dead after the retry is a 502 naming the stage; <code>pipeline-run</code> preflights every
+     hop's <code>/healthz</code> before spending a prefill.</p>
   <ul>
     <li><strong>Only hidden states cross the wire.</strong> Shard 0 embeds the token(s) and runs its
       layer block, then ships the hidden state <code>[batch, seq, hidden]</code> to shard 1, which runs

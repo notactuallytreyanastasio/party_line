@@ -75,6 +75,12 @@ def main(argv: list[str] | None = None) -> int:
     prompt_ids = driver.encode_prompt(tokenizer, messages)
     transport = driver.HttpTransport(endpoints)
 
+    # preflight every hop before spending a prefill — name the dead machine
+    dead = [f"stage {i} ({endpoints[i][0]})" for i, ok in transport.healthz() if not ok]
+    if dead:
+        transport.close()
+        raise SystemExit("unreachable: " + ", ".join(dead) + " — is every serve-shard up?")
+
     detok = tokenizer.detokenizer
     detok.reset()
 

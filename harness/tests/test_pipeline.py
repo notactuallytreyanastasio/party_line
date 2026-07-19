@@ -178,15 +178,23 @@ def test_single_stage_pipeline_still_runs():
 class _FakeExchange:
     """Records register/lease calls; returns canned catalog responses."""
 
-    def __init__(self, lease_stages=None, expires_at=4102444800):
+    def __init__(self, lease_stages=None, expires_at=4102444800, lease_stages_seq=None):
         self.lease_stages = lease_stages or [
             {"index": 1, "url": "http://b", "token": "tB"},
             {"index": 0, "url": "http://a", "token": "tA"},
         ]
+        # optional: a different stage list per successive lease call — used to
+        # simulate a shard restarting (new registration) between leases
+        self.lease_stages_seq = lease_stages_seq
         self.expires_at = expires_at
         self.registered: list = []
         self.auth: list = []
         self.lease_calls = 0
+
+    def current_stages(self):
+        if self.lease_stages_seq:
+            return self.lease_stages_seq[min(self.lease_calls - 1, len(self.lease_stages_seq) - 1)]
+        return self.lease_stages
 
     def handler(self):
         import json
@@ -219,7 +227,7 @@ class _FakeExchange:
                         {"ok": True, "data": {
                             "model": payload["model"],
                             "expires_at": outer.expires_at,
-                            "stages": outer.lease_stages,
+                            "stages": outer.current_stages(),
                         }}
                     )
                 else:
@@ -376,6 +384,65 @@ def test_pipeline_chat_re_leases_when_the_lease_nears_expiry():
         d0.shutdown()
 
 
+def test_http_transport_names_the_dead_hop():
+    """A failed stage raises StageError carrying WHICH hop died."""
+    from party_line_harness.pipeline.serve_shard import ShardHost
+
+    d0, p0 = _serve(ShardHost(FakeStage(), "m", token="s0"))
+    d1, p1 = _serve(ShardHost(FakeStage(), "m", token="s1"))
+    # stage 1 dies: shutdown stops the loop, server_close frees the socket —
+    # without the close, the OS backlog would ACCEPT (and hang) connections
+    d1.shutdown()
+    d1.server_close()
+
+    transport = driver.HttpTransport(
+        [(f"http://127.0.0.1:{p0}", "s0"), (f"http://127.0.0.1:{p1}", "s1")],
+        timeout=5.0,
+    )
+    try:
+        # healthz preflight names it without spending a generation
+        assert transport.healthz() == [(0, True), (1, False)]
+
+        with pytest.raises(driver.StageError) as err:
+            driver.generate(transport, [1], max_tokens=1, session="dead-hop")
+        assert err.value.stage == 1
+        assert f"127.0.0.1:{p1}" in str(err.value)
+    finally:
+        transport.close()
+        d0.shutdown()
+
+
+def test_pipeline_chat_heals_a_restarted_shard_by_re_leasing():
+    """A dead hop mid-request triggers one re-lease-and-retry; because leases
+    prefer the newest registration, a restarted shard recovers invisibly."""
+    from party_line_harness.pipeline.host import PipelineChat
+    from party_line_harness.pipeline.serve_shard import ShardHost
+
+    # the shard that "restarted": the first lease points at its dead old port,
+    # the second lease at its live new one
+    d_dead, p_dead = _serve(ShardHost(FakeStage(), "m", token="tOld"))
+    d_dead.shutdown()
+    d_dead.server_close()  # actually free the socket so the port refuses
+    d_live, p_live = _serve(ShardHost(FakeStage(), "m", token="tNew"))
+
+    ex = _FakeExchange(
+        lease_stages_seq=[
+            [{"index": 0, "url": f"http://127.0.0.1:{p_dead}", "token": "tOld"}],
+            [{"index": 0, "url": f"http://127.0.0.1:{p_live}", "token": "tNew"}],
+        ]
+    )
+    dex, ex_url = _serve_exchange(ex)
+    chat = PipelineChat(ex_url, "m", "pl-key", tokenizer=FakeTokenizer())
+    try:
+        text = chat.chat({"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2})
+        assert text == "t123 t123"  # healed: answered by the restarted shard
+        assert ex.lease_calls == 2  # the failure cost exactly one re-lease
+    finally:
+        chat.close()
+        dex.shutdown()
+        d_live.shutdown()
+
+
 def test_pipeline_host_http_surface_auth_completion_and_503():
     import httpx
 
@@ -428,6 +495,27 @@ def test_pipeline_host_http_surface_auth_completion_and_503():
             headers={"Authorization": "Bearer sek"},
         )
         assert r.status_code == 503
+    finally:
+        httpd.shutdown()
+
+    # a hop still dead after the retry → 502, naming the hop
+    class _DeadHopChat:
+        model = "big-model"
+
+        def chat(self, payload):
+            raise driver.StageError(1, "http://b:8378", RuntimeError("connect refused"))
+
+    httpd = host_mod.make_server(_DeadHopChat(), "pipe", "sek")
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        r = httpx.post(
+            f"http://127.0.0.1:{port}/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer sek"},
+        )
+        assert r.status_code == 502
+        assert "stage 1" in r.json()["error"]
     finally:
         httpd.shutdown()
 

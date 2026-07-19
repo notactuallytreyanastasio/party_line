@@ -88,13 +88,25 @@ class PipelineChat:
 
     def prime(self) -> None:
         """Take the first lease eagerly, so boot fails loudly when no pipeline
-        is assembled yet (the daemon still serves; requests 503 until one is)."""
+        is assembled yet (the daemon still serves; requests 503 until one is).
+        Preflights every hop and names any that are unreachable."""
         with self._lock:
-            self._ensure_lease()
+            transport = self._ensure_lease()
+            for stage, ok in transport.healthz():
+                if not ok:
+                    log.warning("stage %d is unreachable — first request will fail it over", stage)
 
     def chat(self, payload: Any) -> str:
         """One completion for a /v1/chat/completions body. Raises ``ValueError``
-        on a malformed body, ``PipelineUnavailable`` when nothing is leasable."""
+        on a malformed body, ``PipelineUnavailable`` when nothing is leasable,
+        ``driver.StageError`` when a hop is down and a fresh lease didn't heal it.
+
+        A stage failure mid-generation triggers ONE re-lease-and-retry: leases
+        pick the newest registration per slot, so a shard that crashed and came
+        back — or whose token expired mid-flight — heals here without the caller
+        seeing anything but latency. A shard that's still dead fails the retry
+        with its hop named.
+        """
         if not isinstance(payload, dict):
             raise ValueError("body must be a JSON object")
         messages = payload.get("messages")
@@ -104,19 +116,34 @@ class PipelineChat:
         temperature = float(payload.get("temperature", 0.7))
 
         with self._lock:
-            transport = self._ensure_lease()
             prompt_ids = driver.encode_prompt(self.tokenizer, _norm_messages(messages))
-            out = driver.generate(
-                transport,
-                prompt_ids,
-                max_tokens=max_tokens,
-                eos_ids=self._eos,
-                # unique per request: KV on the shards must never collide
-                session=f"chat-{uuid.uuid4().hex[:12]}",
-                sample=temperature > 0,
-                temperature=temperature,
-            )
+            for attempt in (1, 2):
+                transport = self._ensure_lease()
+                try:
+                    out = driver.generate(
+                        transport,
+                        prompt_ids,
+                        max_tokens=max_tokens,
+                        eos_ids=self._eos,
+                        # unique per request: KV on the shards must never collide
+                        session=f"chat-{uuid.uuid4().hex[:12]}",
+                        sample=temperature > 0,
+                        temperature=temperature,
+                    )
+                    break
+                except driver.StageError as exc:
+                    self._invalidate()
+                    if attempt == 2:
+                        raise
+                    log.warning("%s — re-leasing and retrying once", exc)
         return driver.decode_tokens(self.tokenizer, out)
+
+    def _invalidate(self) -> None:
+        """Drop the current lease so the next attempt takes a fresh one."""
+        if self._transport is not None:
+            self._transport.close()
+        self._transport = None
+        self._lease = None
 
     def _ensure_lease(self) -> driver.HttpTransport:
         if (
@@ -201,6 +228,9 @@ def make_handler(chat: PipelineChat, host_name: str, token: str) -> type[BaseHTT
                 return self._send(400, {"error": str(exc)})
             except PipelineUnavailable as exc:
                 return self._send(503, {"error": str(exc)})
+            except driver.StageError as exc:
+                # a hop is down and re-leasing didn't heal it — name the hop
+                return self._send(502, {"error": str(exc)})
             except Exception:
                 log.exception("pipeline generation failed")
                 return self._send(500, {"error": "pipeline generation failed"})

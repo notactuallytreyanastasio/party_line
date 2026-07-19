@@ -24,6 +24,17 @@ import numpy as np
 from . import wire
 
 
+class StageError(RuntimeError):
+    """A specific pipeline stage failed or is unreachable — carries which one,
+    so a caller can say *which machine* died instead of shrugging a 500."""
+
+    def __init__(self, stage: int, url: str, cause: Exception):
+        super().__init__(f"stage {stage} ({url}) failed: {cause}")
+        self.stage = stage
+        self.url = url
+        self.cause = cause
+
+
 class Transport(Protocol):
     """How the driver reaches the stages of one pipeline."""
 
@@ -86,8 +97,8 @@ class HttpTransport:
         self.n_stages = len(endpoints)
 
     def reset(self, session: str) -> None:
-        for url, secret in self.endpoints:
-            self._post(url, secret, "/pipeline/reset", wire.encode_frame({"session": session}))
+        for stage, (url, secret) in enumerate(self.endpoints):
+            self._post(stage, url, secret, "/pipeline/reset", wire.encode_frame({"session": session}))
 
     def call(self, stage, session, *, tokens, hidden, want, sample, temperature, top_p):
         url, secret = self.endpoints[stage]
@@ -101,18 +112,39 @@ class HttpTransport:
         if tokens is not None:
             header["tokens"] = list(tokens)
         frame = wire.encode_frame(header, hidden)
-        raw = self._post(url, secret, "/pipeline/forward", frame)
+        raw = self._post(stage, url, secret, "/pipeline/forward", frame)
         resp, tensor = wire.decode_frame(raw)
         if resp.get("kind") == "token":
             return "token", int(resp["token"])
         return "hidden", tensor
 
-    def _post(self, url: str, secret: str | None, path: str, body: bytes) -> bytes:
+    def healthz(self, *, timeout: float = 5.0) -> list[tuple[int, bool]]:
+        """Preflight every hop: ``[(stage, reachable)]`` via each shard's open
+        ``/healthz``. Lets a caller name the dead machine before generating."""
+        import httpx
+
+        out = []
+        for stage, (url, _secret) in enumerate(self.endpoints):
+            try:
+                resp = self._client.get(url + "/healthz", timeout=timeout)
+                out.append((stage, resp.status_code == 200))
+            except httpx.HTTPError:
+                out.append((stage, False))
+        return out
+
+    def _post(self, stage: int, url: str, secret: str | None, path: str, body: bytes) -> bytes:
+        import httpx
+
         headers = {"Content-Type": "application/octet-stream"}
         if secret:
             headers["Authorization"] = f"Bearer {secret}"
-        resp = self._client.post(url + path, content=body, headers=headers)
-        resp.raise_for_status()
+        try:
+            resp = self._client.post(url + path, content=body, headers=headers)
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            # attribute the failure to its hop — an anonymous error in a chain
+            # of machines is undebuggable
+            raise StageError(stage, url, exc) from exc
         return resp.content
 
     def close(self) -> None:

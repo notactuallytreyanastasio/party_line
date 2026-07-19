@@ -19,6 +19,15 @@
   the model-free test suite covers the whole capstone loop: OpenAI body →
   lease → HTTP transport → secret-gated shards → completion, plus re-leasing
   and the 401/503 surfaces.
+- **Fault tolerance.** A failed hop raises `StageError` naming *which* shard
+  died (an anonymous 500 in a chain of machines is undebuggable);
+  `HttpTransport.healthz()` preflights every hop, and `pipeline-run` refuses to
+  spend a prefill on a pipeline with a dead stage. The pipeline host heals: a
+  stage failure mid-request triggers one re-lease-and-retry — and because
+  leases prefer the newest registration per slot, a shard that crashed and came
+  back (or a token that expired mid-flight) recovers with the caller seeing
+  nothing but latency. A hop still dead after the retry is a 502 naming the
+  stage.
 
 ### Pipeline assembly in the exchange (pool machines, lease a pipeline)
 - The exchange now assembles pipelines from registered shards. A new soft-state
