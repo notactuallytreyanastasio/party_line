@@ -51,7 +51,10 @@ defmodule PartyLineWeb.PipelineControllerTest do
     refute Map.has_key?(p, "secret")
   end
 
-  test "lease hands the driver the ordered endpoints + secrets", %{conn: conn, token: token} do
+  test "lease hands the driver ordered endpoints with tokens, never secrets", %{
+    conn: conn,
+    token: token
+  } do
     conn |> authed(token) |> post(~p"/api/pipelines/register", @shard)
 
     conn
@@ -66,9 +69,16 @@ defmodule PartyLineWeb.PipelineControllerTest do
     conn =
       conn |> authed(token) |> post(~p"/api/pipelines/lease", %{"model" => "big-model-70b"})
 
-    assert %{"ok" => true, "data" => %{"stages" => stages}} = json_response(conn, 200)
-    assert [%{"index" => 0, "url" => u0, "secret" => "sk-shard-a"}, %{"index" => 1, "secret" => "sk-shard-b"}] = stages
+    assert %{"ok" => true, "data" => %{"expires_at" => exp, "stages" => stages}} =
+             json_response(conn, 200)
+
+    assert [%{"index" => 0, "url" => u0, "token" => t0}, %{"index" => 1, "token" => t1}] = stages
     assert u0 == "http://shard-a.tailnet.ts.net:8378"
+
+    # the tokens are the shard-verifiable HMACs; the raw secrets never appear
+    assert t0 == PartyLine.Pipelines.lease_token("sk-shard-a", "big-model-70b", 2, 0, exp)
+    assert t1 == PartyLine.Pipelines.lease_token("sk-shard-b", "big-model-70b", 2, 1, exp)
+    refute Enum.any?(stages, &Map.has_key?(&1, "secret"))
   end
 
   test "lease requires auth and 404s an incomplete pipeline", %{conn: conn, token: token} do

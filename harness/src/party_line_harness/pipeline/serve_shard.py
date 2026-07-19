@@ -48,6 +48,45 @@ class ShardHost:
         self.token = token
         self._lock = threading.Lock()
 
+    def authorized(self, presented: str) -> bool:
+        """The raw secret (manual ``--stage`` wiring by the operator), or a
+        short-lived HMAC lease token minted by the exchange — which holds our
+        secret privately and derives tokens from it, so leasing never hands the
+        secret itself to a caller."""
+        if secrets.compare_digest(presented, self.token):
+            return True
+        return self._lease_ok(presented)
+
+    def _lease_ok(self, presented: str) -> bool:
+        """Verify ``plsl1.<expiry>.<base64url hmac>`` — the MAC is HMAC-SHA256
+        over ``pl-shard-lease|v1|<model>|<count>|<index>|<expiry>`` keyed by our
+        secret. Mirrors ``PartyLine.Pipelines.lease_token/5`` byte for byte (a
+        shared golden vector in both test suites keeps them honest)."""
+        import base64
+        import hashlib
+        import hmac
+        import time
+
+        parts = presented.split(".")
+        if len(parts) != 3 or parts[0] != "plsl1":
+            return False
+        try:
+            expiry = int(parts[1])
+        except ValueError:
+            return False
+        if time.time() > expiry:
+            return False
+        shard = self.stage.shard
+        payload = f"pl-shard-lease|v1|{self.model_id}|{shard.count}|{shard.index}|{expiry}"
+        want = (
+            base64.urlsafe_b64encode(
+                hmac.new(self.token.encode(), payload.encode(), hashlib.sha256).digest()
+            )
+            .rstrip(b"=")
+            .decode()
+        )
+        return hmac.compare_digest(want, parts[2])
+
     def forward(self, header: dict[str, Any], tensor) -> bytes:
         session = str(header.get("session", "s0"))
         want = header.get("want", "hidden")
@@ -93,7 +132,9 @@ def make_handler(host: ShardHost) -> type[BaseHTTPRequestHandler]:
 
         def _authed(self) -> bool:
             got = self.headers.get("Authorization", "")
-            return secrets.compare_digest(got, f"Bearer {host.token}")
+            if not got.startswith("Bearer "):
+                return False
+            return host.authorized(got[len("Bearer ") :])
 
         def _read_frame(self):
             length = int(self.headers.get("Content-Length", 0) or 0)

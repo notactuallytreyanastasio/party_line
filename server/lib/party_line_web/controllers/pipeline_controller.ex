@@ -3,8 +3,8 @@ defmodule PartyLineWeb.PipelineController do
   HTTP surface for the pipeline-shard catalog. A `serve-shard` daemon registers
   its slice, heartbeats to stay listed, and deregisters on exit. `index` is the
   public read — assembled pipelines, no addresses. `lease` hands an
-  authenticated caller (a driver) the ordered endpoints + secrets for a ready
-  pipeline.
+  authenticated caller (a driver) the ordered endpoints for a ready pipeline,
+  each with a short-lived HMAC token — never a shard's secret.
 
   Envelope: `{"ok": true, "data": ...}` / `{"ok": false, "error": ...}`.
   """
@@ -57,8 +57,8 @@ defmodule PartyLineWeb.PipelineController do
         |> put_status(:not_found)
         |> json(%{ok: false, error: "no complete pipeline for that model"})
 
-      stages ->
-        json(conn, %{ok: true, data: %{model: model, stages: stages}})
+      %{expires_at: expires_at, stages: stages} ->
+        json(conn, %{ok: true, data: %{model: model, expires_at: expires_at, stages: stages}})
     end
   end
 

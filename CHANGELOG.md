@@ -6,8 +6,21 @@
 - The exchange now assembles pipelines from registered shards. A new soft-state
   catalog (`PartyLine.Pipelines`, owner-bound like `Hosts`) tracks each shard's
   `{model, index, count, url, secret}`; it groups them by `{model, count}`, marks
-  a model *ready* when every stage is live, and leases the ordered
-  `[{url, secret}]` to an authenticated driver.
+  a model *ready* when every stage is live, and leases the ordered endpoints to
+  an authenticated driver.
+- **Leases are HMAC tokens, not secrets.** A lease carries a short-lived token
+  per stage — HMAC-SHA256 over the shard's `{model, count, index, expiry}`,
+  keyed by its secret — so the secret itself never leaves the exchange (the same
+  contract as a lent host). The shard recomputes the MAC from its own
+  registration to verify; leases expire on their own, and a revoked key can't
+  come back for another. A shared golden vector in both test suites keeps the
+  Elixir minter and Python verifier byte-identical. (Found in a fresh-eyes
+  audit: the first cut leased raw long-lived secrets.)
+- Audit fixes in the catalog: a restarted shard's **newest** registration wins
+  its slot (a strictly-increasing `seq`, since `mono` can tie within a
+  millisecond — the old behavior leased a dead url/stale secret for up to the
+  90s TTL), and assembly is case-insensitive to match `lease`, so two casings of
+  a model are one pipeline instead of two phantom incomplete ones.
 - Routes: `POST /api/pipelines/register` · `/:id/heartbeat` · `DELETE /:id`
   (all atproto-keyed), `GET /api/pipelines` (public, assembled — no addresses),
   `POST /api/pipelines/lease` (atproto-keyed → the driver's endpoints + secrets).

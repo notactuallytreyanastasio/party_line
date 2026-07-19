@@ -254,6 +254,9 @@ serve-shard --model <id> --stage 0/2 \               serve-shard --model <id> --
 pipeline-run --model <id> --server http://<exchange>:4000 --exchange-key pl-… --prompt "…"
 ```
 
+A lease is a set of short-lived HMAC tokens, one per shard — each shard's
+secret stays with the exchange and never travels, same as a lent model.
+
 Or skip the exchange and wire the shards directly:
 `pipeline-run --model <id> --stage http://A=secretA,http://B=secretB --prompt "…"`.
 

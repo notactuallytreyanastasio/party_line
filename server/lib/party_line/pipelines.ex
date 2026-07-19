@@ -7,9 +7,11 @@ defmodule PartyLine.Pipelines do
   A shard registers `{model, index, count}` (stage `index` of a `count`-way
   split) with its `url` + `secret`. When every stage `0..count-1` of a
   `{model, count}` is live, the exchange can hand out a **lease**: the ordered
-  `[{url, secret}]` a harness driver walks a token through. The server never
-  runs the model — it only catalogs shards, assembles pipelines, and leases the
-  endpoints; the driver lives in the harness (see `pipeline/driver.py`).
+  endpoints a harness driver walks a token through, each guarded by a
+  short-lived HMAC token derived from that shard's secret — the secret itself
+  never leaves the exchange. The server never runs the model — it only catalogs
+  shards, assembles pipelines, and leases the endpoints; the driver lives in
+  the harness (see `pipeline/driver.py`).
 
   Like `Hosts`, this is an owner-bound, soft-state registry: an entry is owned
   by the atproto `did` that authenticated it, only that owner may
@@ -19,8 +21,9 @@ defmodule PartyLine.Pipelines do
   ages past the TTL.
 
   The GenServer is the single writer. `list/0` and `pipelines/0` are the public
-  projections (never url or secret); `lease/1`/`lease/2` is the one
-  server-internal place the address + secret leave, for the driver.
+  projections (never url or secret); `lease/1`/`lease/2` is the one place a
+  shard's *address* leaves the catalog — its secret never does, only tokens
+  derived from it.
   """
 
   use GenServer
@@ -29,6 +32,9 @@ defmodule PartyLine.Pipelines do
 
   @default_ttl 90_000
   @default_sweep 30_000
+  # how long a lease's HMAC tokens stay valid — generous enough for a long
+  # generation and reasonable clock skew; a driver re-leases after expiry
+  @default_lease_ttl 3600
 
   @model_max 128
   @name_max 64
@@ -81,16 +87,32 @@ defmodule PartyLine.Pipelines do
   def pipelines(server \\ __MODULE__), do: GenServer.call(server, :pipelines)
 
   @doc """
-  Lease a ready pipeline for `model`: the ordered `[%{index, url, secret}]` a
-  driver walks. Prefers the fewest-hop split (smallest `count`). `nil` if no
-  complete pipeline for that model is live.
+  Lease a ready pipeline for `model`: `%{expires_at, stages: [%{index, url,
+  token}]}` — the ordered endpoints a driver walks. Prefers the fewest-hop
+  split (smallest `count`). `nil` if no complete pipeline for that model is
+  live.
 
-  This is the ONLY place the private url + secret leave the catalog. It hands
-  them to an authenticated caller (the driver), which then reaches the shards
-  directly to relay hidden states — unlike a single lent model, which the
-  exchange proxies.
+  Each stage's `token` is a short-lived HMAC derived from that shard's secret
+  (see `lease_token/5`); the secret itself NEVER leaves the exchange — same
+  contract as a lent host. The shard recomputes the MAC from its own
+  registration to verify, so a lease expires on its own and a revoked caller
+  can't come back for another.
   """
   def lease(server \\ __MODULE__, model), do: GenServer.call(server, {:lease, model})
+
+  @doc """
+  The lease token a driver presents to one shard:
+  `"plsl1.<expires_at>.<base64url hmac>"`, where the MAC is HMAC-SHA256 over
+  `"pl-shard-lease|v1|<model>|<count>|<index>|<expires_at>"` keyed by the
+  shard's registered secret. Pure — the shard-side verifier in
+  `harness/pipeline/serve_shard.py` mirrors it byte for byte (a shared golden
+  vector in both test suites keeps them honest).
+  """
+  def lease_token(secret, model, count, index, expires_at) do
+    payload = "pl-shard-lease|v1|#{model}|#{count}|#{index}|#{expires_at}"
+    mac = :hmac |> :crypto.mac(:sha256, secret, payload) |> Base.url_encode64(padding: false)
+    "plsl1.#{expires_at}.#{mac}"
+  end
 
   @doc "Number of live shards."
   def count(server \\ __MODULE__), do: GenServer.call(server, :count)
@@ -101,10 +123,11 @@ defmodule PartyLine.Pipelines do
   def init(opts) do
     ttl = Keyword.get(opts, :ttl, @default_ttl)
     sweep = Keyword.get(opts, :sweep, @default_sweep)
+    lease_ttl = Keyword.get(opts, :lease_ttl, @default_lease_ttl)
     schedule_sweep(sweep)
     # `seq` is a strictly-increasing registration counter: `mono` can tie within
     # a millisecond, so "which registration is newest" needs its own order.
-    {:ok, %{shards: %{}, ttl: ttl, sweep: sweep, seq: 0}}
+    {:ok, %{shards: %{}, ttl: ttl, sweep: sweep, lease_ttl: lease_ttl, seq: 0}}
   end
 
   @impl true
@@ -172,7 +195,7 @@ defmodule PartyLine.Pipelines do
   end
 
   def handle_call({:lease, model}, _from, state) do
-    {:reply, lease_for(live(state), to_string(model)), state}
+    {:reply, lease_for(live(state), to_string(model), state.lease_ttl), state}
   end
 
   @impl true
@@ -204,31 +227,36 @@ defmodule PartyLine.Pipelines do
     |> Enum.sort_by(&{&1.model, &1.count})
   end
 
-  defp lease_for(entries, model) do
+  defp lease_for(entries, model, lease_ttl) do
     entries
     |> Enum.filter(&(String.downcase(&1.model) == String.downcase(model)))
     |> Enum.group_by(& &1.count)
     # fewest hops first: a complete 2-way beats a complete 4-way
     |> Enum.sort_by(fn {count, _} -> count end)
-    |> Enum.find_value(fn {count, shards} -> assemble_lease(shards, count) end)
+    |> Enum.find_value(fn {count, shards} -> assemble_lease(shards, count, lease_ttl) end)
   end
 
   # One shard per stage (the NEWEST registration wins a tie), ordered
   # 0..count-1, only if every stage is present. Newest matters: a restarted
   # daemon re-registers with a fresh secret while its dead predecessor is still
-  # inside the TTL — leasing the old entry would hand out a dead url/stale
+  # inside the TTL — leasing the old entry would derive tokens from a stale
   # secret for up to 90s.
-  defp assemble_lease(shards, count) do
+  defp assemble_lease(shards, count, lease_ttl) do
     by_index =
       shards
       |> Enum.sort_by(& &1.seq)
       |> Enum.reduce(%{}, fn e, acc -> Map.put(acc, e.index, e) end)
 
     if complete?(MapSet.new(Map.keys(by_index)), count) do
-      for i <- 0..(count - 1) do
-        e = by_index[i]
-        %{index: i, url: e.url, secret: e.secret}
-      end
+      expires_at = System.os_time(:second) + lease_ttl
+
+      stages =
+        for i <- 0..(count - 1) do
+          e = by_index[i]
+          %{index: i, url: e.url, token: lease_token(e.secret, e.model, e.count, e.index, expires_at)}
+        end
+
+      %{expires_at: expires_at, stages: stages}
     end
   end
 

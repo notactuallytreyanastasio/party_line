@@ -92,12 +92,27 @@ defmodule PartyLine.PipelinesTest do
   end
 
   describe "lease" do
-    test "returns the ordered endpoints + secrets for a ready pipeline", %{pid: pid} do
+    test "returns ordered endpoints with HMAC tokens — never a secret", %{pid: pid} do
       {:ok, _} = Pipelines.register(pid, @a, shard("big", 0, 2, url: "http://a.ts.net", secret: "sA"))
       {:ok, _} = Pipelines.register(pid, @b, shard("big", 1, 2, url: "http://b.ts.net", secret: "sB"))
 
-      assert [%{index: 0, url: "http://a.ts.net", secret: "sA"}, %{index: 1, url: "http://b.ts.net", secret: "sB"}] =
-               Pipelines.lease(pid, "big")
+      assert %{expires_at: expires_at, stages: [s0, s1]} = Pipelines.lease(pid, "big")
+      assert %{index: 0, url: "http://a.ts.net", token: t0} = s0
+      assert %{index: 1, url: "http://b.ts.net", token: t1} = s1
+      refute Map.has_key?(s0, :secret)
+
+      # each token is exactly the HMAC a shard can recompute from its own
+      # registration — derived from ITS secret, scoped to ITS slot
+      assert t0 == Pipelines.lease_token("sA", "big", 2, 0, expires_at)
+      assert t1 == Pipelines.lease_token("sB", "big", 2, 1, expires_at)
+      assert expires_at > System.os_time(:second)
+    end
+
+    test "lease_token/5 matches the cross-language golden vector" do
+      # the same literal is asserted by the Python shard verifier's test suite;
+      # if either side drifts from the shared payload format, one of them fails
+      assert Pipelines.lease_token("topsecret", "m", 2, 0, 4_102_444_800) ==
+               "plsl1.4102444800.DzpLeYVJbwyWkV1v-849eDtEuryatPHpbJK6leuvxbo"
     end
 
     test "nil when the pipeline is incomplete", %{pid: pid} do
@@ -110,14 +125,14 @@ defmodule PartyLine.PipelinesTest do
       for i <- 0..2, do: {:ok, _} = Pipelines.register(pid, @a, shard("m", i, 3))
       for i <- 0..1, do: {:ok, _} = Pipelines.register(pid, @a, shard("m", i, 2))
 
-      lease = Pipelines.lease(pid, "m")
-      assert length(lease) == 2
+      assert %{stages: stages} = Pipelines.lease(pid, "m")
+      assert length(stages) == 2
     end
 
     test "is case-insensitive on the model id", %{pid: pid} do
       {:ok, _} = Pipelines.register(pid, @a, shard("Big-Model", 0, 2))
       {:ok, _} = Pipelines.register(pid, @b, shard("Big-Model", 1, 2))
-      assert [_, _] = Pipelines.lease(pid, "big-model")
+      assert %{stages: [_, _]} = Pipelines.lease(pid, "big-model")
     end
 
     test "a restarted shard's NEW registration wins its slot", %{pid: pid} do
@@ -127,8 +142,10 @@ defmodule PartyLine.PipelinesTest do
       {:ok, _} = Pipelines.register(pid, @a, shard("m", 0, 2, url: "http://new.ts.net", secret: "sk-new"))
       {:ok, _} = Pipelines.register(pid, @b, shard("m", 1, 2))
 
-      assert [%{index: 0, url: "http://new.ts.net", secret: "sk-new"} | _] =
+      assert %{expires_at: exp, stages: [%{index: 0, url: "http://new.ts.net", token: t0} | _]} =
                Pipelines.lease(pid, "m")
+
+      assert t0 == Pipelines.lease_token("sk-new", "m", 2, 0, exp)
     end
 
     test "mixed casings across owners still assemble one pipeline", %{pid: pid} do
@@ -137,7 +154,7 @@ defmodule PartyLine.PipelinesTest do
 
       # one ready pipeline, not two phantom incomplete ones — and it leases
       assert [%{count: 2, stages_present: 2, ready: true}] = Pipelines.pipelines(pid)
-      assert [_, _] = Pipelines.lease(pid, "MODEL-X")
+      assert %{stages: [_, _]} = Pipelines.lease(pid, "MODEL-X")
     end
   end
 

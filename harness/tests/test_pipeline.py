@@ -209,9 +209,9 @@ class _FakeExchange:
                     self._reply({"ok": True, "data": {"id": "sh0", "ttl_seconds": 45}})
                 elif self.path == "/api/pipelines/lease":
                     self._reply(
-                        {"ok": True, "data": {"model": payload["model"], "stages": [
-                            {"index": 1, "url": "http://b", "secret": "sB"},
-                            {"index": 0, "url": "http://a", "secret": "sA"},
+                        {"ok": True, "data": {"model": payload["model"], "expires_at": 4102444800, "stages": [
+                            {"index": 1, "url": "http://b", "token": "tB"},
+                            {"index": 0, "url": "http://a", "token": "tA"},
                         ]}}
                     )
                 else:
@@ -237,10 +237,32 @@ def test_lease_pipeline_returns_endpoints_ordered_by_stage():
     try:
         endpoints = driver.lease_pipeline(url, "big-model", key="pl-abc")
         # exchange returned stages out of order; the driver sorts by index
-        assert endpoints == [("http://a", "sA"), ("http://b", "sB")]
+        assert endpoints == [("http://a", "tA"), ("http://b", "tB")]
         assert ex.auth[-1] == "Bearer pl-abc"
     finally:
         httpd.shutdown()
+
+
+# the same literal is asserted against PartyLine.Pipelines.lease_token/5 in the
+# Elixir suite — a shared golden vector keeps both implementations honest
+GOLDEN_SECRET = "topsecret"
+GOLDEN_TOKEN = "plsl1.4102444800.DzpLeYVJbwyWkV1v-849eDtEuryatPHpbJK6leuvxbo"
+
+
+def test_shard_verifies_the_exchanges_hmac_lease_token():
+    from party_line_harness.pipeline.serve_shard import ShardHost
+
+    # FakeStage is stage 0 of 2; the golden token is scoped to model "m", 0/2
+    host = ShardHost(FakeStage(), "m", token=GOLDEN_SECRET)
+    assert host.authorized(GOLDEN_TOKEN)  # the cross-language vector verifies
+    assert host.authorized(GOLDEN_SECRET)  # the raw secret still works (manual wiring)
+
+    # scoped: a shard serving a different model rejects the same token
+    assert not ShardHost(FakeStage(), "other-model", token=GOLDEN_SECRET).authorized(GOLDEN_TOKEN)
+    # expired, malformed, and wrong-key tokens all fail
+    assert not host.authorized("plsl1.123." + GOLDEN_TOKEN.rsplit(".", 1)[1])
+    assert not host.authorized("nonsense")
+    assert not ShardHost(FakeStage(), "m", token="wrong").authorized(GOLDEN_TOKEN)
 
 
 def test_shard_catalog_registers_stage_model_and_key():
@@ -265,7 +287,7 @@ def test_shard_catalog_registers_stage_model_and_key():
 
 class FakeStage:
     def __init__(self):
-        self.shard = type("S", (), {"label": "stage 0/2 layers 0-5"})()
+        self.shard = type("S", (), {"label": "stage 0/2 layers 0-5", "index": 0, "count": 2})()
         self.reset_calls: list[str] = []
 
     def reset(self, session):

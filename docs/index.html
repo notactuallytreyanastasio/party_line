@@ -575,8 +575,13 @@ driver:     party-line-harness pipeline-run --model &lt;id&gt; \
   <p>Give each <code>serve-shard</code> a <code>--server</code> + <code>--exchange-key</code> and it
      registers its slice with the exchange's pipeline catalog; a driver then leases the assembled
      pipeline by name (<code>pipeline-run --server … --exchange-key … --model …</code>) instead of
-     naming shards by hand. The exchange assembles and leases; the driver runs the generation, so the
-     server never touches the model.</p>
+     naming shards by hand. A lease is a set of <strong>short-lived HMAC tokens</strong> — shard
+     secrets never leave the exchange. The exchange assembles and leases; the driver runs the
+     generation, so the server never touches the model.</p>
+  <p><strong>Trust &amp; latency, plainly:</strong> a shard operator sees the hidden states that flow
+     through their machine — the same trust you extend a lent host that sees your prompt. And every
+     token pays one network hop per stage, so split across a tailnet or LAN between people who know
+     each other, not across continents; hop-overlap streaming is the planned mitigation.</p>
   <ul>
     <li><strong>Only hidden states cross the wire.</strong> Shard 0 embeds the token(s) and runs its
       layer block, then ships the hidden state <code>[batch, seq, hidden]</code> to shard 1, which runs
@@ -712,11 +717,14 @@ driver:     party-line-harness pipeline-run --model &lt;id&gt; \
           <td>Public read: assembled pipelines as <code>{model, count, stages_present, ready}</code> —
               never a shard's url or secret.</td></tr>
       <tr><td><code>POST /api/pipelines/lease</code></td>
-          <td><strong>atproto-keyed</strong>: <code>{model}</code> → the ordered
-              <code>[{index, url, secret}]</code> a driver walks (fewest-hop split preferred), or 404
-              if no complete pipeline is live. This is the one place shard addresses + secrets leave
-              the exchange — to the driver, which relays hidden states directly (the server never runs
-              the model).</td></tr>
+          <td><strong>atproto-keyed</strong>: <code>{model}</code> → <code>{expires_at, stages:
+              [{index, url, token}]}</code>, the ordered endpoints a driver walks (fewest-hop split
+              preferred), or 404 if no complete pipeline is live. Each <code>token</code> is a
+              <strong>short-lived HMAC derived from that shard's secret</strong> — the secret itself
+              never leaves the exchange (the same contract as a lent host); the shard recomputes the
+              MAC from its own registration to verify, so leases expire on their own and a revoked
+              key can't come back for another. Only shard <em>addresses</em> travel — to the driver,
+              which relays hidden states directly (the server never runs the model).</td></tr>
     </tbody>
   </table></div>
 
