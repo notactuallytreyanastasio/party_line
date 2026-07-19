@@ -40,10 +40,6 @@ defmodule PartyLine.Pipelines do
   @name_max 64
   @count_max 64
 
-  # A shard may not claim a model id the exchange routes itself (the router
-  # aliases / model families), or it could shadow the default route.
-  @reserved ~w(party-line-auto auto default party-line gpt-oss gemma llama qwen mistral phi)
-
   # ── Client API ──────────────────────────────────────────────────────────
 
   def start_link(opts) do
@@ -288,7 +284,7 @@ defmodule PartyLine.Pipelines do
   end
 
   defp not_reserved(%{model: model}) do
-    if String.downcase(model) in @reserved, do: {:error, :reserved_name}, else: :ok
+    if PartyLine.ReservedModels.reserved?(model), do: {:error, :reserved_name}, else: :ok
   end
 
   # A live {model, count, index} slot belongs to whoever registered it first — a

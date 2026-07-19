@@ -28,11 +28,6 @@ defmodule PartyLine.Hosts do
   @name_max 64
   @model_max 128
 
-  # Handles the exchange routes on its own (the router aliases + the model
-  # families in Agents.Target). A lent host may never claim one, or it could
-  # shadow the default route / a family and intercept prompts.
-  @reserved ~w(party-line-auto auto default party-line gpt-oss gemma llama qwen mistral phi)
-
   # ── Client API ──────────────────────────────────────────────────────────
 
   def start_link(opts) do
@@ -205,7 +200,7 @@ defmodule PartyLine.Hosts do
   end
 
   defp not_reserved(%{name: name, model: model}) do
-    if String.downcase(name) in @reserved or String.downcase(model) in @reserved,
+    if PartyLine.ReservedModels.reserved?(name) or PartyLine.ReservedModels.reserved?(model),
       do: {:error, :reserved_name},
       else: :ok
   end

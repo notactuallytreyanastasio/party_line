@@ -45,12 +45,11 @@ defmodule PartyLineWeb.ChatCompletionsController do
   end
 
   # nil / an alias / a family / a live persona name → the persona (Asks) path
-  @reserved ~w(party-line-auto auto default party-line gpt-oss gemma llama qwen mistral phi)
   defp persona_route?(nil), do: true
 
   defp persona_route?(model) when is_binary(model) do
     down = model |> String.trim() |> String.downcase()
-    down in @reserved or live_persona?(down)
+    PartyLine.ReservedModels.reserved?(down) or live_persona?(down)
   end
 
   defp persona_route?(_), do: true
