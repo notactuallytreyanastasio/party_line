@@ -345,6 +345,23 @@
         <td>Funneling your LLM shouldn't hand the open internet your chat endpoint. The exchange
             becomes the sole authorized caller and the gatekeeper: the host authenticates <em>us</em>,
             we authenticate the user. Reachable, but never open</td></tr>
+      <tr><td><code>390</code> <span class="pill locked">locked</span></td>
+        <td><strong>Pipeline-parallel split inference</strong> (<code>harness/pipeline/</code>). A model's
+            transformer layers are cut into contiguous <em>shards</em>; each <code>serve-shard</code>
+            runs a partial forward (embed on shard 0, final norm + lm_head + sampling on the last, just
+            the layer block between), passing the hidden state <code>[batch, seq, hidden]</code> to the
+            next over a length-prefixed binary frame. A <code>pipeline-run</code> driver holds only the
+            tokenizer and walks a token through the ordered shards; positions never cross the wire —
+            each shard's own KV cache keeps RoPE in lockstep. Native pipeline parallelism, not tensor
+            parallelism and not exo/mlx.distributed</td>
+        <td>Part of the model computes on one machine, part on another — the compute is genuinely
+            split, and pipeline (one tensor per stage boundary) is the only scheme that survives a
+            home network's bandwidth. Each shard <strong>loads only its own weights</strong> (lazy
+            load, prune to the shard, materialize just its layers + its endpoint tensor), so hosting
+            layers 16–31 of an 8B costs ~2.6&nbsp;GB, not the full ~4&nbsp;GB. It reuses the existing
+            catalog/secret gate, so a shard is reachable but never open. Verified lossless: 2- and
+            3-way splits — and the real partial-load path — generate token-for-token the same greedy
+            output as the whole model (<code>pipeline/smoke.py</code>)</td></tr>
       <tr><td><code>269</code> <span class="pill later">later</span></td>
         <td>Interactive persona designer for privileged deployers</td>
         <td>Deferred until we know what a good prime directive looks like in the wild</td></tr>
@@ -533,6 +550,39 @@ scripts/demo.sh --fake   # model-free canned bots, instant</code></pre>
     <li><strong>FakeEngine</strong> swaps in with <code>--engine fake</code>: canned topic-riffing with
       simulated latency, used by the e2e and any pre-model development.</li>
   </ul>
+
+  <h3>Pipeline-parallel split <span class="pill done">v1</span></h3>
+  <p>Too big to fit on one machine? Split the model across two. The
+     <code>harness/pipeline/</code> package cuts a model's transformer layers into contiguous
+     <strong>shards</strong> and runs part of the forward pass on each host:</p>
+  <pre><code>machine A:  party-line-harness serve-shard --model &lt;id&gt; --stage 0/2   # embed + layers 0–15
+machine B:  party-line-harness serve-shard --model &lt;id&gt; --stage 1/2   # layers 16–31 + norm + lm_head
+driver:     party-line-harness pipeline-run --model &lt;id&gt; \
+              --stage http://A=secretA,http://B=secretB --prompt "why do cats knead?"</code></pre>
+  <ul>
+    <li><strong>Only hidden states cross the wire.</strong> Shard 0 embeds the token(s) and runs its
+      layer block, then ships the hidden state <code>[batch, seq, hidden]</code> to shard 1, which runs
+      the rest and — being last — applies the final norm + lm_head and samples. The driver holds only
+      the tokenizer; the shards are pure tensor engines that never load one.</li>
+    <li><strong>Positions never travel.</strong> Each shard keeps its own KV cache; because every shard
+      advances by the same tokens in lockstep, RoPE offsets stay identical across the pipeline without a
+      position ever being sent. The wire carries one tensor per stage boundary — the only scheme that
+      survives a home network's bandwidth (tensor parallelism's per-layer all-reduce does not).</li>
+    <li><strong>Reachable, but never open.</strong> A shard sits behind the same bearer-secret gate as
+      <code>serve-llm</code> (<code>--funnel</code> to expose it, tailnet-only by default). The frame is
+      a length-prefixed <code>PLPS</code> header + a NumPy <code>.npy</code> tensor; hidden states cross
+      as float32, which holds every bf16/fp16 value exactly.</li>
+    <li><strong>Each shard holds only its weights.</strong> A shard lazy-loads the model (weights
+      memory-mapped, nothing in RAM), prunes itself to its layer block, and materializes only what it
+      runs — its layers + the final norm, plus the embedding on shard 0 and the lm_head on the last.
+      The far endpoint stays an un-evaluated mmap and never costs memory. Measured on an 8B: ~2.6&nbsp;GB
+      for a 16-layer shard, ~1.65&nbsp;GB for 8 layers, versus ~4&nbsp;GB whole — and interior shards
+      (no embed, no head) are leaner still.</li>
+    <li><strong>Proven lossless.</strong> <code>pipeline/smoke.py</code> generates greedily with the
+      whole model and again through a 2- and 3-way in-process split <em>and</em> the real partial-load
+      split, asserting the token ids match <em>exactly</em> — a correct split is bit-for-bit identical
+      to the whole model, so any drift is a bug.</li>
+  </ul>
 </section>
 
 <section id="api">
@@ -629,6 +679,21 @@ POST /v1/generate          {persona, topic, roster_names,
      <code>/v1/chat/completions</code> with the secret — a direct hit from the internet has no secret
      and gets 401. Persona hosting still works out-of-band on the tailnet:
      <code>--engine remote --remote-url … --remote-token …</code>.</p>
+
+  <h3>Pipeline shard endpoint (per shard, spoken by the driver)</h3>
+  <p><code>party-line-harness serve-shard</code> exposes one slice of a model behind one
+     <code>Authorization: Bearer &lt;secret&gt;</code>. The body is a length-prefixed binary
+     <strong>frame</strong> — a <code>PLPS</code> magic, a <code>u32</code> header length, a JSON
+     header, then an optional NumPy <code>.npy</code> hidden-state tensor:</p>
+  <pre><code>GET  /healthz          → {"ok": true, "model": …, "shard": "stage 0/2 layers 0-15"}
+POST /pipeline/forward  frame{session, want:"hidden"|"token", tokens?, sample, temperature, top_p}
+                        + hidden tensor?     → frame{kind:"hidden"} + tensor
+                                               │ or frame{kind:"token", token}   (last shard)
+POST /pipeline/reset    frame{session}       → frame{kind:"ok"}   (drop the session's KV caches)</code></pre>
+  <p>Shard 0 is called with <code>tokens</code> (the prompt on prefill, one token per decode step);
+     interior shards with the previous shard's <code>hidden</code> tensor; the last shard with
+     <code>want:"token"</code> samples and returns the id. The driver relays the opaque tensor stage to
+     stage and never interprets it — only the final token, which it detokenizes.</p>
 
   <div class="callout">
     Protocol source of truth: <code>server/lib/party_line_web/bot_socket.ex</code> (transport) and
@@ -737,8 +802,8 @@ friends: []                  # reserved — bot friends list</code></pre>
 </section>
 
 <footer>
-  party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–280) ·
-  last aligned with the code: 2026-07-18 (exchange-gated lent models — funneled, but never open)
+  party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–390) ·
+  last aligned with the code: 2026-07-18 (pipeline-parallel split inference — part of the model per machine)
 </footer>
 </main>
 </div>

@@ -1,0 +1,206 @@
+"""The driver: tokenize a prompt, walk a token through the ordered stages, and
+detokenize the reply.
+
+The driver owns all *text* — the chat template, detokenization, the eos set —
+so the stages stay pure tensor engines that never load a tokenizer. Per step it
+hands stage 0 the current token(s), relays the returned hidden state stage to
+stage, and reads a sampled token back from the last stage; that token becomes
+the next step's input.
+
+A ``Transport`` is how the driver reaches a stage. ``LocalTransport`` calls
+in-process ``PipelineStage`` objects directly (the smoke path and a single-box
+demo); ``HttpTransport`` speaks the wire frame to ``serve-shard`` daemons. Both
+route through the identical ``PipelineStage.step``, so a split that is correct
+in-process is correct across machines — only a socket moves.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable, Iterable, Protocol
+
+import numpy as np
+
+from . import wire
+
+
+class Transport(Protocol):
+    """How the driver reaches the stages of one pipeline."""
+
+    n_stages: int
+
+    def reset(self, session: str) -> None:
+        """Drop any cached state for ``session`` on every stage."""
+        ...
+
+    def call(
+        self,
+        stage: int,
+        session: str,
+        *,
+        tokens: list[int] | None,
+        hidden: np.ndarray | None,
+        want: str,
+        sample: bool,
+        temperature: float,
+        top_p: float,
+    ) -> tuple[str, Any]:
+        """Run one stage's step; return ``("hidden", ndarray)`` or ``("token", int)``."""
+
+
+class LocalTransport:
+    """In-process stages — used by the smoke check and single-box runs."""
+
+    def __init__(self, stages: list[Any]):
+        self.stages = stages
+        self.n_stages = len(stages)
+
+    def reset(self, session: str) -> None:
+        for stage in self.stages:
+            stage.reset(session)
+
+    def call(self, stage, session, *, tokens, hidden, want, sample, temperature, top_p):
+        return self.stages[stage].step(
+            session,
+            tokens=tokens,
+            hidden=hidden,
+            want=want,
+            sample=sample,
+            temperature=temperature,
+            top_p=top_p,
+        )
+
+
+class HttpTransport:
+    """Remote stages behind ``serve-shard`` daemons, addressed in pipeline order.
+
+    Each endpoint is ``(url, secret)`` — the same secret gate ``serve-llm`` uses,
+    so a stage never faces the open internet unauthenticated.
+    """
+
+    def __init__(self, endpoints: list[tuple[str, str | None]], *, timeout: float = 120.0):
+        import httpx
+
+        self._client = httpx.Client(timeout=timeout)
+        self.endpoints = [(u.rstrip("/"), s) for u, s in endpoints]
+        self.n_stages = len(endpoints)
+
+    def reset(self, session: str) -> None:
+        for url, secret in self.endpoints:
+            self._post(url, secret, "/pipeline/reset", wire.encode_frame({"session": session}))
+
+    def call(self, stage, session, *, tokens, hidden, want, sample, temperature, top_p):
+        url, secret = self.endpoints[stage]
+        header = {
+            "session": session,
+            "want": want,
+            "sample": sample,
+            "temperature": temperature,
+            "top_p": top_p,
+        }
+        if tokens is not None:
+            header["tokens"] = list(tokens)
+        frame = wire.encode_frame(header, hidden)
+        raw = self._post(url, secret, "/pipeline/forward", frame)
+        resp, tensor = wire.decode_frame(raw)
+        if resp.get("kind") == "token":
+            return "token", int(resp["token"])
+        return "hidden", tensor
+
+    def _post(self, url: str, secret: str | None, path: str, body: bytes) -> bytes:
+        headers = {"Content-Type": "application/octet-stream"}
+        if secret:
+            headers["Authorization"] = f"Bearer {secret}"
+        resp = self._client.post(url + path, content=body, headers=headers)
+        resp.raise_for_status()
+        return resp.content
+
+    def close(self) -> None:
+        self._client.close()
+
+
+def generate(
+    transport: Transport,
+    prompt_ids: list[int],
+    *,
+    max_tokens: int = 64,
+    eos_ids: Iterable[int] = (),
+    session: str = "s0",
+    sample: bool = False,
+    temperature: float = 0.7,
+    top_p: float = 0.95,
+    on_token: Callable[[int], None] | None = None,
+) -> list[int]:
+    """Run the pipeline to completion, returning the generated token ids.
+
+    Stage 0 is fed the prompt on the first step and the last sampled token on
+    each step after; the hidden state relays through the interior stages; the
+    last stage samples. Stops at ``max_tokens`` or the first eos.
+    """
+    eos = set(eos_ids)
+    n = transport.n_stages
+    transport.reset(session)
+
+    out: list[int] = []
+    step_tokens: list[int] | None = list(prompt_ids)
+    for _ in range(max_tokens):
+        payload: Any = None
+        for stage in range(n):
+            want = "token" if stage == n - 1 else "hidden"
+            kind, payload = transport.call(
+                stage,
+                session,
+                tokens=step_tokens if stage == 0 else None,
+                hidden=None if stage == 0 else payload,
+                want=want,
+                sample=sample,
+                temperature=temperature,
+                top_p=top_p,
+            )
+        token = int(payload)
+        if token in eos:
+            break
+        out.append(token)
+        if on_token is not None:
+            on_token(token)
+        step_tokens = [token]
+    return out
+
+
+# ── tokenizer (driver-side; the stages never load one) ──────────────────────
+
+
+def load_tokenizer(model_id: str) -> Any:
+    """Just the tokenizer for ``model_id`` — no model weights on the driver.
+
+    Fetches only the tokenizer/config files (never the weight shards), so a
+    driver-only machine holds no model at all.
+    """
+    from pathlib import Path
+
+    from huggingface_hub import snapshot_download
+    from mlx_lm.utils import load_tokenizer as _load
+
+    path = (
+        model_id
+        if Path(model_id).exists()
+        else snapshot_download(
+            model_id,
+            allow_patterns=["*.json", "*.txt", "tokenizer*", "*.model"],
+        )
+    )
+    return _load(Path(path))
+
+
+def encode_prompt(tokenizer: Any, messages: list[dict[str, str]]) -> list[int]:
+    """Chat-template ``messages`` to prompt token ids (with the generation
+    prompt appended), matching what the model was trained to expect."""
+    ids = tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+    return list(ids)
+
+
+def eos_token_ids(tokenizer: Any) -> set[int]:
+    ids = set(getattr(tokenizer, "eos_token_ids", None) or [])
+    single = getattr(tokenizer, "eos_token_id", None)
+    if single is not None:
+        ids.add(int(single))
+    return ids

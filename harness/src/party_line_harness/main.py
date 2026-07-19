@@ -7,6 +7,13 @@ There is also a host mode — lend your local model to the line:
 
     party-line-harness serve-llm --engine mlx
     party-line-harness --engine remote --remote-url https://host.ts.net personas/*.yaml
+
+And a pipeline-parallel split — run part of a model on each of two machines:
+
+    party-line-harness serve-shard --model <id> --stage 0/2   # on machine A
+    party-line-harness serve-shard --model <id> --stage 1/2   # on machine B
+    party-line-harness pipeline-run --model <id> \\
+      --stage http://a=secretA,http://b=secretB --prompt "…"  # the driver
 """
 
 from __future__ import annotations
@@ -51,6 +58,14 @@ def cli() -> None:
         from .serve_llm import main as serve_main
 
         raise SystemExit(serve_main(argv[1:]))
+    if argv and argv[0] == "serve-shard":
+        from .pipeline.serve_shard import main as shard_main
+
+        raise SystemExit(shard_main(argv[1:]))
+    if argv and argv[0] == "pipeline-run":
+        from .pipeline.run import main as pipeline_main
+
+        raise SystemExit(pipeline_main(argv[1:]))
 
     parser = argparse.ArgumentParser(description="Run LLM personas on a party line")
     parser.add_argument("personas", nargs="+", help="persona YAML card paths")

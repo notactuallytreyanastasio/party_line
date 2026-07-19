@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Pipeline-parallel split inference (part of the model per machine)
+- A model too big for one host now runs **split across machines**. Its
+  transformer layers are cut into contiguous **shards**; each
+  `party-line-harness serve-shard --stage i/n` runs a partial forward — embed on
+  shard 0, the final norm + lm_head + sampling on the last, just the layer block
+  between — and passes the hidden state `[batch, seq, hidden]` to the next shard.
+- **Native pipeline parallelism**, not tensor parallelism and not exo /
+  mlx.distributed: only one tensor crosses each stage boundary, the scheme a home
+  network can actually carry. Positions never travel — each shard's own KV cache
+  keeps RoPE in lockstep.
+- A `pipeline-run` driver holds only the tokenizer and walks a token through the
+  ordered shards; the shards are pure tensor engines. Shards sit behind the same
+  bearer-secret gate as `serve-llm` (tailnet-only by default, `--funnel` to
+  expose): reachable, but never open.
+- The wire is a length-prefixed `PLPS` frame (JSON header + a NumPy `.npy`
+  tensor); hidden states cross as float32, lossless for bf16/fp16.
+- **Each shard holds only its own weights.** A shard lazy-loads the model
+  (weights memory-mapped), prunes itself to its layer block, and materializes
+  only what it runs — its layers + final norm, plus the embedding on shard 0 and
+  the lm_head on the last; the far endpoint stays an un-evaluated mmap. Measured
+  on an 8B: ~2.6 GB for a 16-layer shard, ~1.65 GB for 8 layers, versus ~4 GB
+  whole — so a model too big for one machine fits across several.
+- **Verified lossless** on Apple Silicon: `pipeline/smoke.py` generates greedily
+  with the whole model and again through 2- and 3-way splits *and* the real
+  partial-load split, asserting the token ids match exactly — a correct split is
+  bit-for-bit the whole model.
+
 ## v0.2.0 — "the on-ramp" (2026-07-18)
 
 The exchange gets a front door for machines, and a second facet for people.
