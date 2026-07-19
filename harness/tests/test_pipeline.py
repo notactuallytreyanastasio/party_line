@@ -59,6 +59,14 @@ def test_parse_stage_spec_forms():
     assert (r.start, r.end) == (3, 7)
 
 
+def test_parse_stage_spec_rejects_out_of_range_index_with_valueerror():
+    # a caller (serve-shard) expects ValueError, not a raw IndexError, so
+    # "--stage 2/2" fails cleanly instead of crashing with a traceback
+    for spec in ("2/2", "5/2", "3/3"):
+        with pytest.raises(ValueError):
+            parse_stage_spec(spec, 12)
+
+
 def test_shard_rejects_impossible_range():
     with pytest.raises(ValueError):
         Shard(start=5, end=2, n_layers=12, index=0, count=1)
@@ -456,6 +464,52 @@ def test_pipeline_chat_heals_a_restarted_shard_by_re_leasing():
         d_live.shutdown()
 
 
+class _FlakyStreamTransport:
+    """A 1-stage transport that samples a few tokens then dies — to prove a
+    mid-stream failure is NOT retried (which would re-emit the prefix)."""
+
+    n_stages = 1
+
+    def __init__(self, die_after: int):
+        self.die_after = die_after
+        self.calls = 0
+        self.resets = 0
+
+    def reset(self, session):
+        self.resets += 1
+
+    def close(self):
+        pass
+
+    def call(self, stage, session, *, tokens, hidden, want, sample, temperature, top_p):
+        self.calls += 1
+        if self.calls > self.die_after:
+            raise driver.StageError(0, "http://dead", RuntimeError("gone"))
+        return "token", 10 + self.calls  # a distinct token per step
+
+
+def test_stream_failure_is_not_retried_so_the_prefix_is_never_re_emitted():
+    from party_line_harness.pipeline import driver as drv
+    from party_line_harness.pipeline.host import PipelineChat
+
+    chat = PipelineChat("http://x", "m", "k", tokenizer=FakeTokenizer())
+    # inject a live lease so _ensure_lease returns our flaky transport
+    flaky = _FlakyStreamTransport(die_after=3)
+    chat._lease = drv.Lease(endpoints=[("http://a", "t")], expires_at=4102444800)
+    chat._transport = flaky
+
+    emitted = []
+    with pytest.raises(drv.StageError):
+        chat.chat({"messages": [{"role": "user", "content": "hi"}], "max_tokens": 20}, on_text=emitted.append)
+
+    # attempt 1: 3 token calls + the 4th that dies = 4 calls total. A retry
+    # would run more calls (and re-emit) — 4 exactly proves the stream ended
+    # instead of retrying once bytes were on the wire.
+    assert flaky.calls == 4
+    assert len(emitted) == 3
+    assert "".join(emitted) == "t11 t12 t13"  # each streamed exactly once, in order
+
+
 def test_pipeline_host_http_surface_auth_completion_and_503():
     import httpx
 
@@ -723,6 +777,25 @@ def test_stage_evicts_least_recently_used_session_beyond_cap():
 
     assert "b" not in st._caches
     assert "a" in st._caches and "c" in st._caches
+
+
+def test_stage_refuses_to_resume_an_evicted_session_instead_of_corrupting():
+    from party_line_harness.pipeline.stage import PipelineStage, ShardOverloaded
+
+    model, _ = _fake_model([_GoodLayer() for _ in range(4)], 4)
+    st = PipelineStage(model, Shard(start=0, end=3, n_layers=4, index=0, count=1), max_sessions=2)
+
+    st._cache_for("a")  # mid-generation session
+    st._cache_for("b")
+    st._cache_for("c")  # evicts "a"
+
+    # "a" resuming would rebuild an empty cache at offset 0 → garbage; refuse
+    with pytest.raises(ShardOverloaded):
+        st._cache_for("a")
+
+    # a fresh session is still fine, and reset() clears the evicted mark
+    st.reset("a")
+    st._cache_for("a")  # no longer raises — a brand-new generation
 
 
 def test_driver_generates_over_http_transport_end_to_end():

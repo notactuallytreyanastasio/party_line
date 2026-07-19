@@ -28,7 +28,7 @@ from typing import Any
 
 from ..serve_llm import _heartbeat_loop, resolve_public_url, stop_tailscale
 from . import wire
-from .stage import PipelineStage
+from .stage import PipelineStage, ShardOverloaded
 
 log = logging.getLogger("party_line")
 
@@ -55,8 +55,11 @@ class ShardHost:
         self.model_id = model_id
         self.token = token
         # per-session forward counters: the driver's request id is the session
-        # id, so this shard's log lines correlate with every other machine's
+        # id, so this shard's log lines correlate with every other machine's.
+        # Guarded by a lock — bookkeeping runs on the (threaded) handler, not
+        # the single MLX worker, so concurrent forwards race the plain dict.
         self._sessions: dict[str, int] = {}
+        self._sessions_lock = threading.Lock()
         from concurrent.futures import ThreadPoolExecutor
 
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-shard")
@@ -69,6 +72,7 @@ class ShardHost:
         host.model_id = model_id
         host.token = token
         host._sessions = {}
+        host._sessions_lock = threading.Lock()
         from concurrent.futures import ThreadPoolExecutor
 
         host._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-shard")
@@ -137,18 +141,20 @@ class ShardHost:
         ms = (time.monotonic() - started) * 1000
 
         # narrate the lifecycle: the prefill announces a question arriving at
-        # THIS slice of the model; then a heartbeat line every 16 forwards so
-        # the flow stays visible without a line per token
-        n = self._sessions.get(session, 0) + 1
-        self._sessions[session] = n
+        # THIS slice of the model; then a heartbeat line every 8 forwards so
+        # the flow stays visible without a line per token. The counters are
+        # shared across handler threads, so mutate them under the lock.
+        with self._sessions_lock:
+            n = self._sessions.get(session, 0) + 1
+            self._sessions[session] = n
+            if len(self._sessions) > 128:  # forgotten sessions must not accumulate
+                self._sessions.pop(next(iter(self._sessions)))
         if tokens is not None and len(tokens) > 1:
             log.info("%s: prefill %d tokens through %s (%.0fms)",
                      session, len(tokens), self.stage.shard.label, ms)
         elif n % 8 == 0:
             log.info("%s: %d forwards through %s (~%.0fms/step)",
                      session, n, self.stage.shard.label, ms)
-        if len(self._sessions) > 64:  # forgotten sessions must not accumulate
-            self._sessions.pop(next(iter(self._sessions)))
 
         if kind == "token":
             return wire.encode_frame({"kind": "token", "token": int(payload)})
@@ -157,7 +163,8 @@ class ShardHost:
     def reset(self, header: dict[str, Any]) -> bytes:
         session = str(header.get("session", "s0"))
         self._submit(self.stage.reset, session)
-        n = self._sessions.pop(session, 0)
+        with self._sessions_lock:
+            n = self._sessions.pop(session, 0)
         if n:
             log.info("%s: done — %d forwards served by %s", session, n, self.stage.shard.label)
         return wire.encode_frame({"kind": "ok"})
@@ -218,6 +225,8 @@ def make_handler(host: ShardHost) -> type[BaseHTTPRequestHandler]:
                 return self._error(400, str(exc))
             try:
                 out = route(header, tensor) if self.path == "/pipeline/forward" else route(header)
+            except ShardOverloaded as exc:
+                return self._error(503, str(exc))
             except ValueError as exc:
                 return self._error(400, str(exc))
             except Exception:

@@ -86,6 +86,11 @@ def _model_name(model: Any) -> str:
     return getattr(model, "model_type", None) or model.__class__.__module__.rsplit(".", 1)[-1]
 
 
+class ShardOverloaded(RuntimeError):
+    """Too many concurrent generations for this shard's KV-cache budget — an
+    in-flight session was evicted, so its next forward can't resume correctly."""
+
+
 def shard_weight_files(index: dict, shard: Shard) -> list[str]:
     """Which safetensors files hold this shard's tensors — pure selection over
     a ``model.safetensors.index.json`` weight map, so a machine downloads only
@@ -133,10 +138,17 @@ class PipelineStage:
     ``max_sessions`` with least-recently-used eviction — KV caches are
     gigabyte-scale, so a caller minting fresh session ids (or a driver that
     died before cleanup) must not grow memory without bound.
+
+    Eviction is *loud*, not silent: a session id is unique per generation and
+    only ever leaves ``_caches`` via ``reset`` (its own end) or eviction. So a
+    forward for a session that was evicted means the shard is oversubscribed
+    mid-generation — resuming it on a fresh empty cache would silently break
+    the lockstep offset and emit garbage, so instead we raise ``ShardOverloaded``
+    and let the caller surface a clean 503.
     """
 
     def __init__(
-        self, model: Any, shard: Shard, *, layer_offset: int | None = None, max_sessions: int = 8
+        self, model: Any, shard: Shard, *, layer_offset: int | None = None, max_sessions: int = 64
     ):
         # where this shard's layers begin in ``model.model.layers``: ``shard.start``
         # when the model is the whole thing (shared across in-process stages), or
@@ -159,6 +171,8 @@ class PipelineStage:
         self._head = self._resolve_head(model)
         self._max_sessions = max_sessions
         self._caches: OrderedDict[str, list] = OrderedDict()
+        # ids we evicted under memory pressure — resuming one is an overload
+        self._evicted: OrderedDict[str, None] = OrderedDict()
 
     @classmethod
     def load(cls, model_id: str, stage_spec: str) -> "PipelineStage":
@@ -247,13 +261,25 @@ class PipelineStage:
 
     def reset(self, session: str) -> None:
         self._caches.pop(session, None)
+        self._evicted.pop(session, None)
 
     def _cache_for(self, session: str) -> list:
         cache = self._caches.get(session)
         if cache is None:
-            # evict the least-recently-used session before admitting a new one
+            # a session we evicted is asking to resume — refuse loudly rather
+            # than rebuild an empty cache at offset 0 and emit garbage
+            if session in self._evicted:
+                raise ShardOverloaded(
+                    f"session {session} was evicted under load; too many concurrent "
+                    f"generations for this shard (cap {self._max_sessions})"
+                )
+            # evict the least-recently-used session before admitting a new one,
+            # remembering it so a later resume is caught above
             if len(self._caches) >= self._max_sessions:
-                self._caches.popitem(last=False)
+                dead, _ = self._caches.popitem(last=False)
+                self._evicted[dead] = None
+                while len(self._evicted) > self._max_sessions:
+                    self._evicted.popitem(last=False)
             # the model builds the right cache type per layer (rotating for
             # sliding layers, plain KV otherwise); take just this shard's slice.
             lo, hi = self._cache_range

@@ -106,7 +106,9 @@ class PipelineChat:
         pick the newest registration per slot, so a shard that crashed and came
         back — or whose token expired mid-flight — heals here without the caller
         seeing anything but latency. A shard that's still dead fails the retry
-        with its hop named.
+        with its hop named. The one exception is a streaming request that has
+        already sent text: those bytes can't be recalled, so a heal there would
+        re-emit the prefix — instead we re-raise and let the stream end cleanly.
 
         With ``on_text``, each decodable piece of text is delivered as it is
         sampled (driving the tokenizer's streaming detokenizer), and the full
@@ -128,11 +130,13 @@ class PipelineChat:
         asked = next((m["content"] for m in reversed(norm) if m["role"] == "user"), "")
 
         # the lifecycle narration: both modes drive the streaming detokenizer,
-        # so the log shows the answer landing typewriter-style either way
+        # so the log shows the answer landing typewriter-style either way. The
+        # detokenizer is shared, so ALL of its use stays inside the lock below.
         detok = self.tokenizer.detokenizer
         pieces: list[str] = []
         unlogged: list[str] = []
         n_tok = 0
+        emitted = False  # has any text reached the client yet? (streaming only)
 
         def flush_log() -> None:
             if unlogged:
@@ -140,7 +144,7 @@ class PipelineChat:
                 unlogged.clear()
 
         def stream_token(tid: int) -> None:
-            nonlocal n_tok
+            nonlocal n_tok, emitted
             n_tok += 1
             detok.add_token(tid)
             piece = detok.last_segment
@@ -149,6 +153,7 @@ class PipelineChat:
                 unlogged.append(piece)
                 if on_text is not None:
                     on_text(piece)
+                    emitted = True
                 if len(unlogged) >= 8:
                     flush_log()
 
@@ -158,8 +163,8 @@ class PipelineChat:
             log.info('q %s: "%s" (%d prompt tokens)', rid, asked[:70], len(prompt_ids))
             for attempt in (1, 2):
                 transport = self._ensure_lease()
-                # retries restart from token zero — restart the stream state
-                # too, or a healed retry would detokenize on stale context
+                # retries restart from token zero — restart the stream state too,
+                # or a healed retry would detokenize on stale context
                 detok.reset()
                 pieces.clear()
                 unlogged.clear()
@@ -181,19 +186,22 @@ class PipelineChat:
                     break
                 except driver.StageError as exc:
                     self._invalidate()
-                    if attempt == 2:
+                    # can't heal transparently once bytes are on the client's
+                    # wire — a retry would re-emit the prefix, so end cleanly
+                    if attempt == 2 or emitted:
                         raise
                     log.warning("%s — re-leasing and retrying once", exc)
             n_stages = transport.n_stages
 
-        detok.finalize()
-        tail = detok.last_segment
-        if tail:
-            pieces.append(tail)
-            unlogged.append(tail)
-            if on_text is not None:
-                on_text(tail)
-        flush_log()
+            detok.finalize()
+            tail = detok.last_segment
+            if tail:
+                pieces.append(tail)
+                unlogged.append(tail)
+                if on_text is not None:
+                    on_text(tail)
+            flush_log()
+
         elapsed = max(time.time() - started, 1e-6)
         log.info(
             "a %s: %d tokens in %.1fs (%.1f tok/s) across %d stages",

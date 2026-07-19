@@ -100,6 +100,8 @@ def parse_stage_spec(spec: str, n_layers: int) -> Shard:
     if "/" in spec:
         i_s, n_s = spec.split("/", 1)
         index, count = int(i_s), int(n_s)
+        if not 0 <= index < count:
+            raise ValueError(f"stage index {index} out of range for a {count}-way split")
         return partition_layers(n_layers, count)[index]
     if ":" in spec:
         a_s, b_s = spec.split(":", 1)
