@@ -34,6 +34,7 @@ import secrets
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -96,7 +97,7 @@ class PipelineChat:
                 if not ok:
                     log.warning("stage %d is unreachable — first request will fail it over", stage)
 
-    def chat(self, payload: Any) -> str:
+    def chat(self, payload: Any, on_text: Callable[[str], None] | None = None) -> str:
         """One completion for a /v1/chat/completions body. Raises ``ValueError``
         on a malformed body, ``PipelineUnavailable`` when nothing is leasable,
         ``driver.StageError`` when a hop is down and a fresh lease didn't heal it.
@@ -106,6 +107,11 @@ class PipelineChat:
         back — or whose token expired mid-flight — heals here without the caller
         seeing anything but latency. A shard that's still dead fails the retry
         with its hop named.
+
+        With ``on_text``, each decodable piece of text is delivered as it is
+        sampled (driving the tokenizer's streaming detokenizer), and the full
+        text is still returned. The callback runs on this thread, inside the
+        lock — keep it fast; a slow consumer stalls the pipeline.
         """
         if not isinstance(payload, dict):
             raise ValueError("body must be a JSON object")
@@ -115,10 +121,25 @@ class PipelineChat:
         max_tokens = int(payload.get("max_tokens") or 512)
         temperature = float(payload.get("temperature", 0.7))
 
+        detok = self.tokenizer.detokenizer if on_text is not None else None
+        pieces: list[str] = []
+
+        def stream_token(tid: int) -> None:
+            detok.add_token(tid)
+            piece = detok.last_segment
+            if piece:
+                pieces.append(piece)
+                on_text(piece)
+
         with self._lock:
             prompt_ids = driver.encode_prompt(self.tokenizer, _norm_messages(messages))
             for attempt in (1, 2):
                 transport = self._ensure_lease()
+                if detok is not None:
+                    # retries restart from token zero — restart the stream state
+                    # too, or a healed retry would detokenize on stale context
+                    detok.reset()
+                    pieces.clear()
                 try:
                     out = driver.generate(
                         transport,
@@ -129,6 +150,7 @@ class PipelineChat:
                         session=f"chat-{uuid.uuid4().hex[:12]}",
                         sample=temperature > 0,
                         temperature=temperature,
+                        on_token=stream_token if detok is not None else None,
                     )
                     break
                 except driver.StageError as exc:
@@ -136,7 +158,14 @@ class PipelineChat:
                     if attempt == 2:
                         raise
                     log.warning("%s — re-leasing and retrying once", exc)
-        return driver.decode_tokens(self.tokenizer, out)
+        if detok is None:
+            return driver.decode_tokens(self.tokenizer, out)
+        detok.finalize()
+        tail = detok.last_segment
+        if tail:
+            pieces.append(tail)
+            on_text(tail)
+        return "".join(pieces)
 
     def _invalidate(self) -> None:
         """Drop the current lease so the next attempt takes a fresh one."""
@@ -222,6 +251,8 @@ def make_handler(chat: PipelineChat, host_name: str, token: str) -> type[BaseHTT
                 payload = json.loads(self.rfile.read(length) if length else b"")
             except json.JSONDecodeError:
                 return self._send(400, {"error": "malformed json"})
+            if isinstance(payload, dict) and payload.get("stream"):
+                return self._stream(payload)
             try:
                 text = chat.chat(payload)
             except ValueError as exc:
@@ -235,6 +266,70 @@ def make_handler(chat: PipelineChat, host_name: str, token: str) -> type[BaseHTT
                 log.exception("pipeline generation failed")
                 return self._send(500, {"error": "pipeline generation failed"})
             self._send(200, _openai_completion(text, chat.model))
+
+        def _stream(self, payload: dict) -> None:
+            """The SSE branch: OpenAI ``chat.completion.chunk`` events as tokens
+            land, then a ``stop`` chunk and ``[DONE]``. Headers go out lazily on
+            the first piece, so errors raised before any text still return the
+            normal JSON statuses; once chunks are on the wire the only honest
+            failure mode is to stop writing and close.
+            """
+            chunk_id = "chatcmpl-" + secrets.token_urlsafe(12)
+            created = int(time.time())
+            started = False
+
+            def start() -> None:
+                nonlocal started
+                # SSE has no Content-Length, so bypass _send and write directly
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                started = True
+
+            def write_chunk(delta: dict, finish_reason: str | None) -> None:
+                event = {
+                    "id": chunk_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": chat.model,
+                    "choices": [
+                        {"index": 0, "delta": delta, "finish_reason": finish_reason}
+                    ],
+                }
+                self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
+                self.wfile.flush()
+
+            def emit(piece: str) -> None:
+                if not started:
+                    start()
+                write_chunk({"content": piece}, None)
+
+            try:
+                chat.chat(payload, on_text=emit)
+            except ValueError as exc:
+                if not started:
+                    return self._send(400, {"error": str(exc)})
+                return log.warning("stream aborted mid-flight: %s", exc)
+            except PipelineUnavailable as exc:
+                if not started:
+                    return self._send(503, {"error": str(exc)})
+                return log.warning("stream aborted mid-flight: %s", exc)
+            except driver.StageError as exc:
+                # a hop is down and re-leasing didn't heal it — name the hop
+                if not started:
+                    return self._send(502, {"error": str(exc)})
+                return log.warning("stream aborted mid-flight: %s", exc)
+            except Exception:
+                log.exception("pipeline generation failed")
+                if not started:
+                    return self._send(500, {"error": "pipeline generation failed"})
+                return
+            if not started:  # an empty generation still gets a well-formed stream
+                start()
+            write_chunk({}, "stop")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
 
     return Handler
 
