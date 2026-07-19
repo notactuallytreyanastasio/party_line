@@ -375,6 +375,16 @@
             only catalogs, assembles, and leases; the driver lives in the harness. A live slot is
             owner-bound so no one can inject a poisoned shard, and the SSRF url guard is now one shared
             <code>PartyLine.PublicUrl</code></td></tr>
+      <tr><td><code>417</code> <span class="pill locked">locked</span></td>
+        <td><strong>pipeline-host: the split-inference capstone.</strong> A harness daemon leases an
+            assembled pipeline, fronts it as an OpenAI endpoint (tokenizer only, no weights), and
+            registers in the <em>host catalog</em> — so the assembled model answers on
+            <code>/v1/chat/completions</code> like any lent model. Re-leases before token expiry;
+            503 while no complete pipeline is live</td>
+        <td>The rejected option was a server-side driver, which would have put tensors through the
+            exchange — the server must never run inference. Composition won: pipeline lease × host
+            catalog, zero new server routes. A model no single machine could hold is now addressable
+            by any OpenAI client — the pooled-machines story, end to end</td></tr>
       <tr><td><code>269</code> <span class="pill later">later</span></td>
         <td>Interactive persona designer for privileged deployers</td>
         <td>Deferred until we know what a good prime directive looks like in the wild</td></tr>
@@ -582,6 +592,15 @@ driver:     party-line-harness pipeline-run --model &lt;id&gt; \
      through their machine — the same trust you extend a lent host that sees your prompt. And every
      token pays one network hop per stage, so split across a tailnet or LAN between people who know
      each other, not across continents; hop-overlap streaming is the planned mitigation.</p>
+  <p><strong>The capstone — <code>pipeline-host</code>.</strong> To put the assembled model on the
+     public API, a pipeline host leases the pipeline, fronts it as an OpenAI endpoint (holding only
+     the tokenizer — never a weight), and registers in the exchange's <em>host catalog</em>. From the
+     exchange's point of view it's just another lent model, so the whole gated proxy composes and a
+     model <em>no single machine could hold</em> answers on <code>/v1/chat/completions</code>:</p>
+  <pre><code>caller ── pl-… key ──▶ exchange ── host secret ──▶ pipeline-host ──▶ shard A ──▶ shard B
+        (atproto-keyed)            (host catalog)   (tokenizer only)   (layers 0–15) (16–31 + head)</code></pre>
+  <p>Zero new server routes: the capstone is pure composition (pipeline lease × host catalog). The
+     host re-leases before its tokens expire and answers 503 while no complete pipeline is live.</p>
   <ul>
     <li><strong>Only hidden states cross the wire.</strong> Shard 0 embeds the token(s) and runs its
       layer block, then ships the hidden state <code>[batch, seq, hidden]</code> to shard 1, which runs
@@ -863,8 +882,8 @@ friends: []                  # reserved — bot friends list</code></pre>
 </section>
 
 <footer>
-  party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–400) ·
-  last aligned with the code: 2026-07-19 (pipeline assembly in the exchange — pool machines, lease a pipeline)
+  party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–417) ·
+  last aligned with the code: 2026-07-19 (pipeline-host — a model no single machine could hold, on /v1)
 </footer>
 </main>
 </div>

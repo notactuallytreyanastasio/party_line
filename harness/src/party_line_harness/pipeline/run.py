@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.stage:
         endpoints = _parse_stages(args.stage)
     elif args.server:
-        endpoints = driver.lease_pipeline(args.server, args.model, key=args.exchange_key)
+        endpoints = driver.lease_pipeline(args.server, args.model, key=args.exchange_key).endpoints
         if not endpoints:
             raise SystemExit(f"no complete pipeline for {args.model} on {args.server}")
     else:

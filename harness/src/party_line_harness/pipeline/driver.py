@@ -16,6 +16,7 @@ in-process is correct across machines — only a socket moves.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Protocol
 
 import numpy as np
@@ -118,12 +119,22 @@ class HttpTransport:
         self._client.close()
 
 
-def lease_pipeline(server: str, model: str, *, key: str | None, timeout: float = 10.0):
-    """Ask the exchange to lease a ready pipeline for ``model``: the ordered
-    ``[(url, token)]`` its shards live at. Each token is a short-lived HMAC the
-    shard verifies against its own secret — the secret never travels. Raises on
-    an incomplete pipeline (404) or auth failure."""
+@dataclass(frozen=True)
+class Lease:
+    """A leased pipeline: the ordered ``(url, token)`` endpoints a driver
+    walks, and when the tokens expire (unix seconds) — re-lease before then."""
+
+    endpoints: list[tuple[str, str]]
+    expires_at: float
+
+
+def lease_pipeline(server: str, model: str, *, key: str | None, timeout: float = 10.0) -> Lease:
+    """Ask the exchange to lease a ready pipeline for ``model``. Each stage's
+    token is a short-lived HMAC the shard verifies against its own secret — the
+    secret never travels. Raises on an incomplete pipeline (404) or auth
+    failure."""
     import httpx
+    import time
 
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     resp = httpx.post(
@@ -133,8 +144,12 @@ def lease_pipeline(server: str, model: str, *, key: str | None, timeout: float =
         timeout=timeout,
     )
     resp.raise_for_status()
-    stages = ((resp.json() or {}).get("data") or {}).get("stages") or []
-    return [(s["url"], s["token"]) for s in sorted(stages, key=lambda s: s["index"])]
+    data = (resp.json() or {}).get("data") or {}
+    stages = data.get("stages") or []
+    return Lease(
+        endpoints=[(s["url"], s["token"]) for s in sorted(stages, key=lambda s: s["index"])],
+        expires_at=float(data.get("expires_at") or (time.time() + 3600)),
+    )
 
 
 def generate(
@@ -232,3 +247,13 @@ def eos_token_ids(tokenizer: Any) -> set[int]:
     if single is not None:
         ids.add(int(single))
     return ids
+
+
+def decode_tokens(tokenizer: Any, ids: list[int]) -> str:
+    """Detokenize a whole generated sequence at once (non-streaming callers)."""
+    detok = tokenizer.detokenizer
+    detok.reset()
+    for tid in ids:
+        detok.add_token(tid)
+    detok.finalize()
+    return detok.text

@@ -8,6 +8,8 @@ harness convention that the model path is smoke-verified, not unit-tested.
 
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 import pytest
 
@@ -176,12 +178,15 @@ def test_single_stage_pipeline_still_runs():
 class _FakeExchange:
     """Records register/lease calls; returns canned catalog responses."""
 
-    def __init__(self):
-        import json
-
-        self._json = json
+    def __init__(self, lease_stages=None, expires_at=4102444800):
+        self.lease_stages = lease_stages or [
+            {"index": 1, "url": "http://b", "token": "tB"},
+            {"index": 0, "url": "http://a", "token": "tA"},
+        ]
+        self.expires_at = expires_at
         self.registered: list = []
         self.auth: list = []
+        self.lease_calls = 0
 
     def handler(self):
         import json
@@ -209,11 +214,13 @@ class _FakeExchange:
                     outer.registered.append(payload)
                     self._reply({"ok": True, "data": {"id": "sh0", "ttl_seconds": 45}})
                 elif self.path == "/api/pipelines/lease":
+                    outer.lease_calls += 1
                     self._reply(
-                        {"ok": True, "data": {"model": payload["model"], "expires_at": 4102444800, "stages": [
-                            {"index": 1, "url": "http://b", "token": "tB"},
-                            {"index": 0, "url": "http://a", "token": "tA"},
-                        ]}}
+                        {"ok": True, "data": {
+                            "model": payload["model"],
+                            "expires_at": outer.expires_at,
+                            "stages": outer.lease_stages,
+                        }}
                     )
                 else:
                     self._reply({"ok": False})
@@ -236,9 +243,10 @@ def test_lease_pipeline_returns_endpoints_ordered_by_stage():
     ex = _FakeExchange()
     httpd, url = _serve_exchange(ex)
     try:
-        endpoints = driver.lease_pipeline(url, "big-model", key="pl-abc")
+        lease = driver.lease_pipeline(url, "big-model", key="pl-abc")
         # exchange returned stages out of order; the driver sorts by index
-        assert endpoints == [("http://a", "tA"), ("http://b", "tB")]
+        assert lease.endpoints == [("http://a", "tA"), ("http://b", "tB")]
+        assert lease.expires_at == 4102444800
         assert ex.auth[-1] == "Bearer pl-abc"
     finally:
         httpd.shutdown()
@@ -279,6 +287,147 @@ def test_shard_catalog_registers_stage_model_and_key():
         assert sent["model"] == "big-model" and sent["index"] == 1 and sent["count"] == 2
         assert sent["url"] == "http://me.ts.net" and sent["secret"] == "sekret"
         assert ex.auth[-1] == "Bearer pl-xyz"
+    finally:
+        httpd.shutdown()
+
+
+# ── pipeline-host: an assembled pipeline as a lent model (no model) ─────────
+
+
+class _FakeDetok:
+    def reset(self):
+        self._toks = []
+
+    def add_token(self, t):
+        self._toks.append(t)
+
+    def finalize(self):
+        pass
+
+    @property
+    def text(self):
+        return " ".join(f"t{t}" for t in self._toks)
+
+
+class FakeTokenizer:
+    """Just enough tokenizer for the driver: template → ids, ids → text."""
+
+    eos_token_id = 99
+
+    def __init__(self):
+        self.detokenizer = _FakeDetok()
+
+    def apply_chat_template(self, messages, add_generation_prompt=True, **_kw):
+        return list(range(1, len(messages) + 2))
+
+
+def test_pipeline_host_completes_a_chat_over_a_leased_pipeline():
+    """The capstone loop, model-free: OpenAI body → PipelineChat → lease from a
+    fake exchange → HttpTransport → two secret-gated shards → completion text."""
+    from party_line_harness.pipeline.host import PipelineChat
+    from party_line_harness.pipeline.serve_shard import ShardHost
+
+    # two shards whose secrets equal the lease tokens the fake exchange mints
+    d0, p0 = _serve(ShardHost(FakeStage(), "m", token="tA"))
+    d1, p1 = _serve(ShardHost(FakeStage(), "m", token="tB"))
+    ex = _FakeExchange(
+        lease_stages=[
+            {"index": 1, "url": f"http://127.0.0.1:{p1}", "token": "tB"},
+            {"index": 0, "url": f"http://127.0.0.1:{p0}", "token": "tA"},
+        ]
+    )
+    dex, ex_url = _serve_exchange(ex)
+    chat = PipelineChat(ex_url, "m", "pl-key", tokenizer=FakeTokenizer())
+    try:
+        text = chat.chat({"messages": [{"role": "user", "content": "hi"}], "max_tokens": 3})
+        assert text == "t123 t123 t123"  # FakeStage's last stage always samples 123
+
+        # a far-future lease is reused, not re-taken per request
+        chat.chat({"messages": [{"role": "user", "content": "again"}], "max_tokens": 1})
+        assert ex.lease_calls == 1
+    finally:
+        chat.close()
+        dex.shutdown()
+        d0.shutdown()
+        d1.shutdown()
+
+
+def test_pipeline_chat_re_leases_when_the_lease_nears_expiry():
+    import time as _time
+
+    from party_line_harness.pipeline.host import PipelineChat
+    from party_line_harness.pipeline.serve_shard import ShardHost
+
+    d0, p0 = _serve(ShardHost(FakeStage(), "m", token="tA"))
+    # expires inside the margin → every chat takes a fresh lease
+    ex = _FakeExchange(
+        lease_stages=[{"index": 0, "url": f"http://127.0.0.1:{p0}", "token": "tA"}],
+        expires_at=int(_time.time()) + 5,
+    )
+    dex, ex_url = _serve_exchange(ex)
+    chat = PipelineChat(ex_url, "m", "pl-key", tokenizer=FakeTokenizer(), lease_margin=60.0)
+    try:
+        chat.chat({"messages": [{"role": "user", "content": "one"}], "max_tokens": 1})
+        chat.chat({"messages": [{"role": "user", "content": "two"}], "max_tokens": 1})
+        assert ex.lease_calls == 2
+    finally:
+        chat.close()
+        dex.shutdown()
+        d0.shutdown()
+
+
+def test_pipeline_host_http_surface_auth_completion_and_503():
+    import httpx
+
+    from party_line_harness.pipeline import host as host_mod
+
+    class _StubChat:
+        model = "big-model"
+
+        def __init__(self, text=None):
+            self.text = text
+
+        def chat(self, payload):
+            if self.text is None:
+                raise host_mod.PipelineUnavailable("no complete pipeline for big-model")
+            return self.text
+
+    # happy path: an OpenAI chat.completion comes back, secret-gated
+    httpd = host_mod.make_server(_StubChat("hello there"), "pipe", "sek")
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        body = {"messages": [{"role": "user", "content": "hi"}]}
+        r = httpx.post(f"http://127.0.0.1:{port}/v1/chat/completions", json=body)
+        assert r.status_code == 401  # no secret → never open
+
+        r = httpx.post(
+            f"http://127.0.0.1:{port}/v1/chat/completions",
+            json=body,
+            headers={"Authorization": "Bearer sek"},
+        )
+        assert r.status_code == 200
+        out = r.json()
+        assert out["object"] == "chat.completion"
+        assert out["model"] == "big-model"
+        assert out["choices"][0]["message"]["content"] == "hello there"
+
+        h = httpx.get(f"http://127.0.0.1:{port}/healthz")
+        assert h.status_code == 200 and h.json()["assembled"] is True
+    finally:
+        httpd.shutdown()
+
+    # no pipeline live → 503, so the exchange's caller gets a clean error
+    httpd = host_mod.make_server(_StubChat(None), "pipe", "sek")
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        r = httpx.post(
+            f"http://127.0.0.1:{port}/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer sek"},
+        )
+        assert r.status_code == 503
     finally:
         httpd.shutdown()
 

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### pipeline-host — the capstone: an assembled pipeline on /v1
+- `party-line-harness pipeline-host --model <id> --server … --exchange-key pl-…`
+  leases a ready pipeline, fronts it as an OpenAI endpoint (holding only the
+  tokenizer, never a weight), and registers in the exchange's **host catalog** —
+  so a model **no single machine could hold** answers on `/v1/chat/completions`
+  like any lent model, to any OpenAI client with an atproto key.
+- Zero new server routes: the capstone is pure composition (pipeline lease ×
+  host catalog). The exchange proxies to the pipeline host with its registered
+  secret exactly as it does any lent model; the host walks the tokens through
+  the leased shards. The server still never runs an inference step.
+- The host re-leases before its HMAC tokens expire (60s margin) and answers 503
+  while no complete pipeline is live. Generations are serialized through the
+  pipeline for now — hop-overlap scheduling is the planned perf work.
+- `driver.lease_pipeline` now returns a `Lease` (endpoints + `expires_at`), and
+  the model-free test suite covers the whole capstone loop: OpenAI body →
+  lease → HTTP transport → secret-gated shards → completion, plus re-leasing
+  and the 401/503 surfaces.
+
 ### Pipeline assembly in the exchange (pool machines, lease a pipeline)
 - The exchange now assembles pipelines from registered shards. A new soft-state
   catalog (`PartyLine.Pipelines`, owner-bound like `Hosts`) tracks each shard's

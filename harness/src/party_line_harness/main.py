@@ -14,6 +14,11 @@ And a pipeline-parallel split — run part of a model on each of two machines:
     party-line-harness serve-shard --model <id> --stage 1/2   # on machine B
     party-line-harness pipeline-run --model <id> \\
       --stage http://a=secretA,http://b=secretB --prompt "…"  # the driver
+
+And front an assembled pipeline as a lent model on the exchange's /v1:
+
+    party-line-harness pipeline-host --model <id> \\
+      --server http://exchange:4000 --exchange-key pl-…
 """
 
 from __future__ import annotations
@@ -66,6 +71,10 @@ def cli() -> None:
         from .pipeline.run import main as pipeline_main
 
         raise SystemExit(pipeline_main(argv[1:]))
+    if argv and argv[0] == "pipeline-host":
+        from .pipeline.host import main as pipeline_host_main
+
+        raise SystemExit(pipeline_host_main(argv[1:]))
 
     parser = argparse.ArgumentParser(description="Run LLM personas on a party line")
     parser.add_argument("personas", nargs="+", help="persona YAML card paths")

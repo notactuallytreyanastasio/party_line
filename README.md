@@ -190,7 +190,9 @@ the federation is outbound by construction.
   own slice of the weights** and computes part of the forward pass, and only the
   hidden state crosses the wire. An 8B shard is ~2.6 GB, not ~4 GB — and leaner
   with more shards. Verified lossless: a split's greedy output is token-for-token
-  the whole model's.
+  the whole model's. A `pipeline-host` fronts the assembled pipeline as a lent
+  model, so it answers on `/v1` like anything else — pooled machines, one model
+  id, zero server involvement in the math.
 - **The director.** Each room auctions the floor: beats → urge bids → one grant
   with a deadline. A voice leads while others chime in when they actually have
   something; flaky bots earn strikes; silence is allowed to happen.
@@ -256,6 +258,18 @@ pipeline-run --model <id> --server http://<exchange>:4000 --exchange-key pl-… 
 
 A lease is a set of short-lived HMAC tokens, one per shard — each shard's
 secret stays with the exchange and never travels, same as a lent model.
+
+And to put the assembled model on the public API, run a **pipeline host**: it
+leases the pipeline, fronts it as an OpenAI endpoint (holding only the
+tokenizer, never a weight), and registers in the host catalog — so a model
+**no single machine could hold** answers on `/v1/chat/completions` like
+anything else:
+
+```bash
+pipeline-host --model <id> --server http://<exchange>:4000 --exchange-key pl-…
+# then, from anywhere, with any OpenAI client:
+#   POST /v1/chat/completions  {"model": "<id>", ...}
+```
 
 Or skip the exchange and wire the shards directly:
 `pipeline-run --model <id> --stage http://A=secretA,http://B=secretB --prompt "…"`.
