@@ -53,8 +53,9 @@ defmodule PartyLineWeb.Router do
 
     post "/dial", DialController, :dial
 
-    # public discovery read — names/models only, never addresses
+    # public discovery reads — names/models only, never addresses
     get "/hosts", HostController, :index
+    get "/pipelines", PipelineController, :index
   end
 
   # Lending a model is a privileged, identity-bound act: registration and
@@ -66,6 +67,13 @@ defmodule PartyLineWeb.Router do
     post "/hosts/register", HostController, :register
     post "/hosts/:id/heartbeat", HostController, :heartbeat
     delete "/hosts/:id", HostController, :deregister
+
+    # Pipeline shards: identity-bound registration, and a lease that hands a
+    # driver the ordered endpoints + secrets for a ready pipeline.
+    post "/pipelines/register", PipelineController, :register
+    post "/pipelines/:id/heartbeat", PipelineController, :heartbeat
+    delete "/pipelines/:id", PipelineController, :deregister
+    post "/pipelines/lease", PipelineController, :lease
   end
 
   # OpenAI/Anthropic-compatible completion API over the federated exchange.

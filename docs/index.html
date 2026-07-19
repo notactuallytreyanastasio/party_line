@@ -362,6 +362,19 @@
             catalog/secret gate, so a shard is reachable but never open. Verified lossless: 2- and
             3-way splits — and the real partial-load path — generate token-for-token the same greedy
             output as the whole model (<code>pipeline/smoke.py</code>)</td></tr>
+      <tr><td><code>400</code> <span class="pill locked">locked</span></td>
+        <td><strong>Pipeline assembly in the exchange.</strong> A shard catalog
+            (<code>PartyLine.Pipelines</code>, an owner-bound soft-state GenServer like
+            <code>Hosts</code>) where each <code>serve-shard</code> registers <code>{model, index,
+            count, url, secret}</code>. The exchange groups shards by <code>{model, count}</code>,
+            marks a model <em>ready</em> when every stage is live (<code>GET /api/pipelines</code>),
+            and hands an authenticated driver a <strong>lease</strong> — the ordered
+            <code>[{url, secret}]</code> — via <code>POST /api/pipelines/lease</code></td>
+        <td>Split inference becomes real in the party line: strangers pool machines and the exchange
+            finds the complete pipelines. The server still <strong>never runs the model</strong> — it
+            only catalogs, assembles, and leases; the driver lives in the harness. A live slot is
+            owner-bound so no one can inject a poisoned shard, and the SSRF url guard is now one shared
+            <code>PartyLine.PublicUrl</code></td></tr>
       <tr><td><code>269</code> <span class="pill later">later</span></td>
         <td>Interactive persona designer for privileged deployers</td>
         <td>Deferred until we know what a good prime directive looks like in the wild</td></tr>
@@ -674,6 +687,34 @@ driver:     party-line-harness pipeline-run --model &lt;id&gt; \
     </tbody>
   </table></div>
 
+  <h3>Pipeline catalog (HTTP)</h3>
+  <p>Tracks pipeline <em>shards</em> — each machine lending a contiguous slice
+     (<code>index</code> of a <code>count</code>-way split) of one model — and
+     assembles them into pipelines. When every stage <code>0…count-1</code> of a
+     <code>{model, count}</code> is live, the model is <em>leasable</em>.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Route</th><th>Behavior</th></tr></thead>
+    <tbody>
+      <tr><td><code>POST /api/pipelines/register</code></td>
+          <td><strong>atproto-keyed</strong>: owned by your did.
+              <code>{model, index, count, url, secret, name?}</code> → 201 <code>{id, ttl_seconds}</code>.
+              A live <code>{model, count, index}</code> slot can't be claimed by another owner (so a
+              stranger can't slip a poisoned shard into a pipeline); reserved model ids and
+              private/loopback urls are rejected; a secret is required.</td></tr>
+      <tr><td><code>POST /api/pipelines/:id/heartbeat</code></td><td>200, or 404 after TTL (90 s) expiry. Owner-only (403 otherwise).</td></tr>
+      <tr><td><code>DELETE /api/pipelines/:id</code></td><td>204 — the shard daemon calls this on shutdown.</td></tr>
+      <tr><td><code>GET /api/pipelines</code></td>
+          <td>Public read: assembled pipelines as <code>{model, count, stages_present, ready}</code> —
+              never a shard's url or secret.</td></tr>
+      <tr><td><code>POST /api/pipelines/lease</code></td>
+          <td><strong>atproto-keyed</strong>: <code>{model}</code> → the ordered
+              <code>[{index, url, secret}]</code> a driver walks (fewest-hop split preferred), or 404
+              if no complete pipeline is live. This is the one place shard addresses + secrets leave
+              the exchange — to the driver, which relays hidden states directly (the server never runs
+              the model).</td></tr>
+    </tbody>
+  </table></div>
+
   <h3>Hosted-LLM endpoint (per host, reached only by the exchange)</h3>
   <p><code>party-line-harness serve-llm</code> exposes, behind one <code>Authorization: Bearer &lt;secret&gt;</code>
      that only the exchange holds:</p>
@@ -809,8 +850,8 @@ friends: []                  # reserved — bot friends list</code></pre>
 </section>
 
 <footer>
-  party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–390) ·
-  last aligned with the code: 2026-07-18 (pipeline-parallel split inference — part of the model per machine)
+  party line · Elixir/Phoenix + Python/MLX · decision history in deciduous (nodes 264–400) ·
+  last aligned with the code: 2026-07-19 (pipeline assembly in the exchange — pool machines, lease a pipeline)
 </footer>
 </main>
 </div>

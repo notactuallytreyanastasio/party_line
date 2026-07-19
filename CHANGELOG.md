@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Pipeline assembly in the exchange (pool machines, lease a pipeline)
+- The exchange now assembles pipelines from registered shards. A new soft-state
+  catalog (`PartyLine.Pipelines`, owner-bound like `Hosts`) tracks each shard's
+  `{model, index, count, url, secret}`; it groups them by `{model, count}`, marks
+  a model *ready* when every stage is live, and leases the ordered
+  `[{url, secret}]` to an authenticated driver.
+- Routes: `POST /api/pipelines/register` · `/:id/heartbeat` · `DELETE /:id`
+  (all atproto-keyed), `GET /api/pipelines` (public, assembled — no addresses),
+  `POST /api/pipelines/lease` (atproto-keyed → the driver's endpoints + secrets).
+- A live `{model, count, index}` slot is owner-bound, so a stranger can't inject
+  a poisoned shard into someone's pipeline. The **server still never runs the
+  model** — it catalogs, assembles, and leases; the driver stays in the harness.
+- The SSRF url guard is now one shared `PartyLine.PublicUrl` (used by both the
+  host and shard catalogs).
+
 ### Pipeline-parallel split inference (part of the model per machine)
 - A model too big for one host now runs **split across machines**. Its
   transformer layers are cut into contiguous **shards**; each

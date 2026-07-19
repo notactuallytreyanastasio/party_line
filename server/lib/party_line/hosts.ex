@@ -247,45 +247,9 @@ defmodule PartyLine.Hosts do
 
   defp validate_name(_), do: {:error, :invalid_name}
 
-  defp validate_url("http://" <> rest = url) when rest != "", do: public_url(url)
-  defp validate_url("https://" <> rest = url) when rest != "", do: public_url(url)
-  defp validate_url(_), do: {:error, :invalid_url}
-
-  # The exchange makes an outbound request to this url, so it must not point at
-  # our own network: reject loopback, link-local (incl. cloud metadata at
-  # 169.254.169.254), and private ranges, plus obvious internal names. This
-  # blocks SSRF via IP literals; a public name that resolves private is a
-  # residual we mitigate with `redirect: false` at proxy time.
-  defp public_url(url) do
-    host = url |> URI.parse() |> Map.get(:host) |> to_string() |> String.downcase()
-
-    cond do
-      host == "" -> {:error, :invalid_url}
-      host in ~w(localhost metadata.google.internal metadata) -> {:error, :private_url}
-      String.ends_with?(host, [".local", ".internal"]) -> {:error, :private_url}
-      private_ip?(host) -> {:error, :private_url}
-      true -> {:ok, url}
-    end
-  end
-
-  defp private_ip?(host) do
-    host = host |> String.trim_leading("[") |> String.trim_trailing("]")
-
-    case :inet.parse_address(String.to_charlist(host)) do
-      {:ok, addr} -> blocked_ip?(addr)
-      _ -> false
-    end
-  end
-
-  defp blocked_ip?({127, _, _, _}), do: true
-  defp blocked_ip?({10, _, _, _}), do: true
-  defp blocked_ip?({192, 168, _, _}), do: true
-  defp blocked_ip?({169, 254, _, _}), do: true
-  defp blocked_ip?({172, b, _, _}) when b in 16..31, do: true
-  defp blocked_ip?({0, 0, 0, 0}), do: true
-  defp blocked_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
-  defp blocked_ip?({a, _, _, _, _, _, _, _}) when a in 0xFC00..0xFDFF, do: true
-  defp blocked_ip?(_), do: false
+  # The exchange makes an outbound request to this url, so it must be a public
+  # address — the SSRF guard is shared with the pipeline-shard catalog.
+  defp validate_url(url), do: PartyLine.PublicUrl.validate(url)
 
   defp validate_model(model) when is_binary(model) do
     trimmed = String.trim(model)

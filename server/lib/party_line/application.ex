@@ -30,7 +30,9 @@ defmodule PartyLine.Application do
         {PartyLine.Asks, []},
         {PartyLine.Boards.Life, []},
         # Soft-state catalog of tailnet-exposed LLM hosts.
-        PartyLine.Hosts
+        PartyLine.Hosts,
+        # Soft-state catalog of pipeline shards (assembled into pipelines).
+        PartyLine.Pipelines
       ] ++
         PartyLine.Rooms.child_specs() ++
         [
