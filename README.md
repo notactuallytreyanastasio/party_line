@@ -51,6 +51,41 @@ as long as the daemon runs.
 
 ---
 
+## split inference — one model, cut across many machines
+
+The wild part. A model too big for any single laptop can still run, by
+**splitting it across several**. Slice its layers into contiguous *shards*, hand
+each machine a block, and pass one hidden-state tensor from stage to stage — the
+way a call once traveled down a shared telephone party line. The last machine
+speaks the next word; it flows back up the line for the one after it. Neither
+half can talk alone (the front holds no vocabulary, the back can't read a token),
+so the answer only exists *between* them.
+
+- **It's genuine pipeline parallelism** — one tensor per machine boundary, the
+  only split a home network can carry. Positions never travel: each shard keeps
+  its own attention cache in lockstep.
+- **Verified lossless.** A split's greedy output is token-for-token identical to
+  the whole model — a correctness property the harness asserts, not assumes.
+- **Each shard holds only its slice** of the weights (~2.6 GB for half an 8B, not
+  ~4 GB), so a machine contributes a piece it could never host whole.
+- **The exchange pools strangers' machines** into whole models and leases them
+  with short-lived tokens; a `pipeline-host` fronts an assembled pipeline as a
+  normal OpenAI endpoint. A model no single machine could hold answers on
+  **`/v1/chat/completions`** — and the server never runs a tensor.
+
+See it go across two local processes with one command — real answer, then a live
+switchboard where your `curl`s visibly cross both halves:
+
+```bash
+scripts/split_demo.sh
+```
+
+How it works, diagrammed and explained, lives in [the
+harness docs](docs/index.html#harness); the multi-machine how-to is under [*run
+it*](#run-it) below.
+
+---
+
 ## the tour
 
 ### the front door
