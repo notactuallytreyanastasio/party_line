@@ -12,7 +12,13 @@ defmodule PartyLine.ATProto.Identity do
     authorization server, whose metadata carries the PAR/token endpoints.
   """
 
-  @plc "https://plc.directory"
+  # Network bases, configurable with prod defaults so tests can point the whole
+  # resolve chain at a stub (the PDS + auth-server come from response bodies, so
+  # a stub controls those by what it returns).
+  defp plc, do: Application.get_env(:party_line, :atproto_plc, "https://plc.directory")
+
+  defp resolver,
+    do: Application.get_env(:party_line, :atproto_resolver, "https://public.api.bsky.app")
 
   @doc "handle-or-did → %{did, handle, pds, auth_server}"
   def resolve(input) do
@@ -32,9 +38,6 @@ defmodule PartyLine.ATProto.Identity do
 
   # ── steps ─────────────────────────────────────────────────────────────────
 
-  # a public appview that resolves handles by BOTH methods (DNS + HTTP)
-  @resolver "https://public.api.bsky.app"
-
   defp to_did("did:" <> _ = did), do: {:ok, did, nil}
 
   defp to_did(handle) do
@@ -51,7 +54,7 @@ defmodule PartyLine.ATProto.Identity do
   end
 
   defp resolve_via_xrpc(host) do
-    case get_json("#{@resolver}/xrpc/com.atproto.identity.resolveHandle?handle=#{host}") do
+    case get_json("#{resolver()}/xrpc/com.atproto.identity.resolveHandle?handle=#{host}") do
       {:ok, %{"did" => "did:" <> _ = did}} -> {:ok, did}
       _ -> :error
     end
@@ -69,7 +72,7 @@ defmodule PartyLine.ATProto.Identity do
   end
 
   defp pds_for("did:plc:" <> _ = did) do
-    with {:ok, doc} <- get_json("#{@plc}/#{did}") do
+    with {:ok, doc} <- get_json("#{plc()}/#{did}") do
       extract_pds(doc)
     end
   end
