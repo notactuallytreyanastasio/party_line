@@ -189,9 +189,9 @@ async def test_compose_request_dispatches_and_sends_composed_frame():
     await client._handle(
         ws, {"type": "compose_request", "assignment_id": "a-1", "topic": "seed oils"}
     )
-    deadline = asyncio.get_running_loop().time() + 5
-    while not ws.sent and asyncio.get_running_loop().time() < deadline:
-        await asyncio.sleep(0.01)
+    # the handler spawned a background task (tracked in client._bg); await it
+    # as a barrier instead of polling ws.sent
+    await asyncio.wait_for(asyncio.gather(*client._bg), timeout=5)
 
     assert ws.sent == [
         {"type": "composed", "assignment_id": "a-1", "body": "hot take: seeds are eggs"}
@@ -213,9 +213,9 @@ async def test_comment_request_dispatches_and_sends_commented_frame():
             "body": "day 40, Herbert thrives",
         },
     )
-    deadline = asyncio.get_running_loop().time() + 5
-    while not ws.sent and asyncio.get_running_loop().time() < deadline:
-        await asyncio.sleep(0.01)
+    # the handler spawned a background task (tracked in client._bg); await it
+    # as a barrier instead of polling ws.sent
+    await asyncio.wait_for(asyncio.gather(*client._bg), timeout=5)
 
     assert ws.sent == [{"type": "commented", "task_id": "c-1", "body": "put Herbert on the lease"}]
 
@@ -229,11 +229,8 @@ async def test_ask_request_streams_deltas_then_a_final_answered():
 
     await client._handle(ws, {"type": "ask_request", "ask_id": "ask-1", "prompt": "why knead"})
 
-    deadline = asyncio.get_running_loop().time() + 5
-    while not any(f["type"] == "answered" for f in ws.sent) and (
-        asyncio.get_running_loop().time() < deadline
-    ):
-        await asyncio.sleep(0.01)
+    # await the spawned _answer task directly instead of polling for "answered"
+    await asyncio.wait_for(asyncio.gather(*client._bg), timeout=5)
 
     deltas = [f for f in ws.sent if f["type"] == "answer_delta"]
     answered = [f for f in ws.sent if f["type"] == "answered"]
@@ -413,10 +410,13 @@ def test_ws_url_maps_https_to_wss():
 async def test_dial_failure_redials_instead_of_killing_the_persona(monkeypatch):
     monkeypatch.setattr(client_mod, "RECONNECT_DELAYS", [0.0])
     attempts = 0
+    tried_thrice = asyncio.Event()
 
     async def failing_session(self):
         nonlocal attempts
         attempts += 1
+        if attempts >= 3:
+            tried_thrice.set()
         raise httpx.ConnectError("dial refused")
 
     monkeypatch.setattr(PersonaClient, "_session", failing_session)
@@ -424,9 +424,8 @@ async def test_dial_failure_redials_instead_of_killing_the_persona(monkeypatch):
 
     task = asyncio.create_task(client.run())
     try:
-        deadline = asyncio.get_running_loop().time() + 5
-        while attempts < 3 and asyncio.get_running_loop().time() < deadline:
-            await asyncio.sleep(0.01)
+        # the redial loop signals directly on the third attempt — no polling
+        await asyncio.wait_for(tried_thrice.wait(), timeout=5)
     finally:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

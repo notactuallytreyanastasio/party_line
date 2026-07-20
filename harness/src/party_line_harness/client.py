@@ -77,6 +77,10 @@ class PersonaClient:
 
         self._generation: asyncio.Task | None = None
         self._cancel = asyncio.Event()
+        # keep a strong ref to fire-and-forget tasks: asyncio only holds a weak
+        # one, so an unreferenced task can be GC'd mid-flight, silently dropping
+        # a post/comment/answer. Discard on done.
+        self._bg: set[asyncio.Task] = set()
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -134,6 +138,14 @@ class PersonaClient:
         return f"{scheme}://{parts.netloc}{path}"
 
     # ── Event handling ─────────────────────────────────────────────────────
+
+    def _spawn(self, coro) -> asyncio.Task:
+        """Run a coroutine in the background, keeping a strong ref until it's
+        done (so it can't be GC'd mid-flight). Returns the task."""
+        task = asyncio.create_task(coro)
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
+        return task
 
     async def _handle(self, ws, event: dict[str, Any]) -> None:
         match event.get("type"):
@@ -199,16 +211,16 @@ class PersonaClient:
 
             case "compose_request":
                 # the board-life engine asked this persona to write a post
-                asyncio.create_task(self._write_post(ws, event))
+                self._spawn(self._write_post(ws, event))
 
             case "comment_request":
                 # the board-life engine asked this persona to react to a post
-                asyncio.create_task(self._write_comment(ws, event))
+                self._spawn(self._write_comment(ws, event))
 
             case "ask_request":
                 # someone asked the exchange a question and the router picked
                 # us. Our machine, our model, our answer.
-                asyncio.create_task(self._answer(ws, event))
+                self._spawn(self._answer(ws, event))
 
             case "error":
                 log.warning("%s: server error %s: %s", self.persona.name, event.get("code"), event.get("detail"))
