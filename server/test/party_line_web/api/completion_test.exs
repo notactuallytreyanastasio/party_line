@@ -35,6 +35,31 @@ defmodule PartyLineWeb.CompletionTest do
     end
   end
 
+  defmodule DeadHostProxy do
+    @behaviour PartyLine.API.HostProxy.Behaviour
+    @impl true
+    def chat(_host, _body), do: {:error, :host_unreachable}
+  end
+
+  defmodule ErroringHostProxy do
+    @behaviour PartyLine.API.HostProxy.Behaviour
+    @impl true
+    def chat(_host, _body), do: {:error, {:host_status, 500}}
+  end
+
+  defmodule MalformedHostProxy do
+    # a hostile host: non-string content + an extra field it hopes we reflect
+    @behaviour PartyLine.API.HostProxy.Behaviour
+    @impl true
+    def chat(_host, _body) do
+      {:ok,
+       %{
+         "leak" => "secret-internal",
+         "choices" => [%{"message" => %{"role" => "assistant", "content" => 123}}]
+       }}
+    end
+  end
+
   setup do
     %{asks: asks, bots: bots} =
       ExchangeFake.start!(
@@ -231,6 +256,26 @@ defmodule PartyLineWeb.CompletionTest do
       assert text =~ "answered:"
       assert body["stop_reason"] == "end_turn"
     end
+
+    test "missing messages is a 400 in the Anthropic error shape", %{conn: conn, token: token} do
+      conn = conn |> authed(token) |> post_json("/v1/messages", %{model: "party-line-auto"})
+
+      assert conn.status == 400
+      assert %{"type" => "error", "error" => %{"type" => "invalid_request_error"}} =
+               json_response(conn, 400)
+    end
+
+    test "an empty exchange is a 503 overloaded_error", %{conn: conn, token: token} do
+      %{asks: empty} = ExchangeFake.start!([])
+      Application.put_env(:party_line, :api_asks, empty)
+
+      conn =
+        conn
+        |> authed(token)
+        |> post_json("/v1/messages", %{messages: [%{role: "user", content: "anyone?"}]})
+
+      assert %{"error" => %{"type" => "overloaded_error"}} = json_response(conn, 503)
+    end
   end
 
   describe "proxying a lent model (exchange-gated)" do
@@ -302,6 +347,58 @@ defmodule PartyLineWeb.CompletionTest do
       assert [%{"message" => %{"content" => "proxied<hello host>"}}] = body["choices"]
       assert body["party_line"]["proxied_via"] == "exchange"
       assert body["party_line"]["host"] == "gpu-closet"
+    end
+
+    test "an unreachable host is a 502 host_unreachable", %{conn: conn, token: token} do
+      Application.put_env(:party_line, :api_host_proxy, DeadHostProxy)
+
+      conn =
+        conn
+        |> authed(token)
+        |> post_json("/v1/chat/completions", %{
+          model: "qwen-7b",
+          messages: [%{role: "user", content: "hi"}]
+        })
+
+      assert %{"error" => %{"code" => "host_unreachable"}} = json_response(conn, 502)
+    end
+
+    test "a host that errors is a 502 host_error", %{conn: conn, token: token} do
+      Application.put_env(:party_line, :api_host_proxy, ErroringHostProxy)
+
+      conn =
+        conn
+        |> authed(token)
+        |> post_json("/v1/chat/completions", %{
+          model: "qwen-7b",
+          messages: [%{role: "user", content: "hi"}]
+        })
+
+      assert %{"error" => %{"code" => "host_error"}} = json_response(conn, 502)
+    end
+
+    test "a hostile host's raw body is never reflected; content is coerced", %{
+      conn: conn,
+      token: token
+    } do
+      Application.put_env(:party_line, :api_host_proxy, MalformedHostProxy)
+
+      conn =
+        conn
+        |> authed(token)
+        |> post_json("/v1/chat/completions", %{
+          model: "qwen-7b",
+          messages: [%{role: "user", content: "hi"}]
+        })
+
+      body = json_response(conn, 200)
+      # rebuilt into a clean completion attributed to the exchange's host record;
+      # the non-string content is coerced, and the host's extra field never leaks
+      assert body["object"] == "chat.completion"
+      assert [%{"message" => %{"content" => content}}] = body["choices"]
+      assert is_binary(content)
+      refute conn.resp_body =~ "secret-internal"
+      refute conn.resp_body =~ "leak"
     end
 
     test "streaming a lent model re-emits the answer as SSE", %{conn: conn, token: token} do
