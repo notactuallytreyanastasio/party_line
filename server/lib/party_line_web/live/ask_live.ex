@@ -26,7 +26,7 @@ defmodule PartyLineWeb.AskLive do
     {:ok,
      socket
      |> assign(page_title: "ask the exchange", turns: [], draft: "", waiting: nil)
-     |> assign(exchange: Bots.cards())}
+     |> assign(exchange: Bots.cards(bots_server()))}
   end
 
   @impl true
@@ -45,7 +45,7 @@ defmodule PartyLineWeb.AskLive do
         {:noreply, socket}
 
       true ->
-        case Asks.ask(Asks, self(), body, []) do
+        case Asks.ask(asks_server(), self(), body, []) do
           {:error, :nobody_online} ->
             {:noreply,
              socket
@@ -98,8 +98,13 @@ defmodule PartyLineWeb.AskLive do
   end
 
   def handle_info(:refresh_exchange, socket) do
-    {:noreply, assign(socket, exchange: Bots.cards())}
+    {:noreply, assign(socket, exchange: Bots.cards(bots_server()))}
   end
+
+  # Test seams: point the LiveView at a fake exchange (a real Asks in front of a
+  # fake Bots) via config, exactly as the completion API controllers do.
+  defp asks_server, do: Application.get_env(:party_line, :api_asks, PartyLine.Asks)
+  defp bots_server, do: Application.get_env(:party_line, :api_bots, PartyLine.Bots)
 
   defp add(socket, turn), do: assign(socket, turns: socket.assigns.turns ++ [turn])
 
