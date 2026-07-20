@@ -896,3 +896,94 @@ def test_serve_shard_forward_and_reset_and_health():
         assert rr.status_code == 200 and stage.reset_calls == ["s9"]
     finally:
         httpd.shutdown()
+
+
+# ── CLI + error-path coverage (model-free) ──────────────────────────────────
+
+
+def test_decode_frame_rejects_bad_header_json():
+    import struct
+
+    bad = wire.MAGIC + struct.pack(">I", 5) + b"{oops"
+    with pytest.raises(ValueError, match="header"):
+        wire.decode_frame(bad)
+
+
+def test_decode_frame_rejects_a_corrupt_tensor_payload():
+    # a valid header-only frame with trailing bytes that aren't a .npy tensor
+    frame = wire.encode_frame({"k": 1}) + b"not-an-npy"
+    with pytest.raises(ValueError, match="tensor"):
+        wire.decode_frame(frame)
+
+
+def test_parse_stages_handles_url_secret_and_secretless_forms():
+    from party_line_harness.pipeline.run import _parse_stages
+
+    assert _parse_stages("http://a=s1, http://b") == [("http://a", "s1"), ("http://b", None)]
+
+
+def test_parse_stages_empty_spec_exits():
+    from party_line_harness.pipeline.run import _parse_stages
+
+    with pytest.raises(SystemExit):
+        _parse_stages("")
+
+
+def test_pipeline_run_requires_stage_or_server():
+    from party_line_harness.pipeline import run
+
+    # neither --stage nor --server: exits before ever loading a tokenizer
+    with pytest.raises(SystemExit):
+        run.main(["--model", "m", "--prompt", "p"])
+
+
+@pytest.mark.parametrize(
+    "cmd,modpath",
+    [
+        ("serve-llm", "party_line_harness.serve_llm"),
+        ("serve-shard", "party_line_harness.pipeline.serve_shard"),
+        ("pipeline-run", "party_line_harness.pipeline.run"),
+        ("pipeline-host", "party_line_harness.pipeline.host"),
+    ],
+)
+def test_main_dispatches_each_subcommand(cmd, modpath, monkeypatch):
+    import importlib
+    import sys
+
+    from party_line_harness import main as main_mod
+
+    mod = importlib.import_module(modpath)
+    seen = {}
+
+    def record(argv):
+        seen["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(mod, "main", record)
+    monkeypatch.setattr(sys, "argv", ["party-line-harness", cmd, "--flag", "v"])
+
+    with pytest.raises(SystemExit) as exc:
+        main_mod.cli()
+    assert seen["argv"] == ["--flag", "v"]  # argv after the subcommand, sliced
+    assert exc.value.code == 0
+
+
+def test_generate_cleanup_reset_failure_never_shadows_the_result():
+    # the finally-block reset() is best-effort: if it raises, the generated
+    # tokens (and any real error) must still surface, not the cleanup error
+    class _CleanupRaises:
+        n_stages = 1
+
+        def __init__(self):
+            self.resets = 0
+
+        def reset(self, session):
+            self.resets += 1
+            if self.resets == 2:  # the finally cleanup, after the start reset
+                raise RuntimeError("cleanup boom")
+
+        def call(self, *a, **k):
+            return "token", 11
+
+    out = driver.generate(_CleanupRaises(), [7], max_tokens=1)
+    assert out == [11]  # result survives the cleanup explosion

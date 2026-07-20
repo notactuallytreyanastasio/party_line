@@ -144,13 +144,13 @@ class FakeTokenizer:
 # ── harness: one assembled fake pipeline behind a pipeline-host ─────────────
 
 
-def _spin_up_host():
+def _spin_up_host(stage=None):
     """Fake shard + fake exchange + PipelineChat + host server; returns the
     host's base url and a teardown closure."""
     from party_line_harness.pipeline.host import PipelineChat
     from party_line_harness.pipeline.serve_shard import ShardHost
 
-    d0, p0 = _serve(ShardHost(FakeStage(), "m", token="tA"))
+    d0, p0 = _serve(ShardHost(stage or FakeStage(), "m", token="tA"))
     ex = _FakeExchange(
         lease_stages=[{"index": 0, "url": f"http://127.0.0.1:{p0}", "token": "tA"}]
     )
@@ -249,3 +249,60 @@ def test_non_stream_requests_still_return_a_plain_completion():
         assert out["choices"][0]["finish_reason"] == "stop"
     finally:
         teardown()
+
+
+class _EosStage(FakeStage):
+    """A shard whose first sampled token is the tokenizer's eos, so generation
+    ends immediately with zero content — exercises the empty-stream path."""
+
+    def step(self, session, *, want, **kw):
+        if want == "token":
+            return "token", FakeTokenizer.eos_token_id  # 99
+        return super().step(session, want=want, **kw)
+
+
+def test_empty_generation_still_yields_a_well_formed_stream():
+    url, teardown = _spin_up_host(_EosStage())
+    try:
+        r = httpx.post(
+            f"{url}/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
+            headers={"Authorization": "Bearer sek"},
+        )
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "text/event-stream"
+        events = _sse_events(r.text)
+        assert events[-1] == "[DONE]"
+        chunks = [json.loads(e) for e in events[:-1]]
+        # no content deltas — just the terminal stop chunk
+        assert len(chunks) == 1
+        assert chunks[0]["choices"][0]["delta"] == {}
+        assert chunks[0]["choices"][0]["finish_reason"] == "stop"
+    finally:
+        teardown()
+
+
+def test_stream_while_no_pipeline_is_a_json_503_not_sse():
+    from party_line_harness.pipeline import host as host_mod
+
+    class _Unavailable:
+        model = "m"
+
+        def chat(self, payload, on_text=None):
+            raise host_mod.PipelineUnavailable("no complete pipeline for m")
+
+    httpd = host_mod.make_server(_Unavailable(), "pipe", "sek")
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        # the error is raised before any chunk is written, so the stream branch
+        # falls back to the normal JSON 503 (never opens an SSE response)
+        r = httpx.post(
+            f"http://127.0.0.1:{port}/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
+            headers={"Authorization": "Bearer sek"},
+        )
+        assert r.status_code == 503
+        assert r.headers["content-type"] == "application/json"
+    finally:
+        httpd.shutdown()
