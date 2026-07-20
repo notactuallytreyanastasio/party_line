@@ -194,21 +194,26 @@ defmodule PartyLine.PipelinesTest do
       assert :ok = Pipelines.heartbeat(pid, id, @a)
     end
 
-    test "the sweep timer actually prunes dead shards from state", %{pid: _pid} do
-      # a real TTL with a fast sweep — the timer (not just the read filter) must
-      # drop the entry, and reschedule itself so it keeps sweeping
-      {:ok, sweeper} = Pipelines.start_link(name: nil, ttl: 20, sweep: 20)
-      {:ok, _} = Pipelines.register(sweeper, @a, shard("m", 0, 2))
-      assert Pipelines.count(sweeper) == 1
+    test "the sweep prunes dead shards from state (not just the read filter)" do
+      # ttl: -1 makes every entry read-expired instantly, so no sleep is needed
+      # to age it; heartbeat/3 is map-presence only (TTL-blind), so it tells us
+      # whether the entry is still in STATE vs merely filtered out of reads.
+      {:ok, sweeper} = Pipelines.start_link(name: nil, ttl: -1, sweep: 60_000)
+      {:ok, %{id: id}} = Pipelines.register(sweeper, @a, shard("m", 0, 2))
 
-      # wait out the TTL + a couple sweep ticks
-      Process.sleep(120)
-      assert Pipelines.count(sweeper) == 0
+      # expired for reads, but still in state until a sweep runs
+      assert Pipelines.list(sweeper) == []
+      assert :ok = Pipelines.heartbeat(sweeper, id, @a)
 
-      # the timer is still alive and pruning a second registration too
-      {:ok, _} = Pipelines.register(sweeper, @a, shard("m", 1, 2))
-      Process.sleep(120)
-      assert Pipelines.count(sweeper) == 0
+      # drive the sweep by message; the next call is a barrier — the mailbox
+      # processes :sweep before it, so it reflects post-sweep state, no sleep
+      send(sweeper, :sweep)
+      assert {:error, :unknown} = Pipelines.heartbeat(sweeper, id, @a)
+
+      # the handler reschedules itself, so a second tick prunes a fresh entry too
+      {:ok, %{id: id2}} = Pipelines.register(sweeper, @a, shard("m", 1, 2))
+      send(sweeper, :sweep)
+      assert {:error, :unknown} = Pipelines.heartbeat(sweeper, id2, @a)
     end
   end
 end

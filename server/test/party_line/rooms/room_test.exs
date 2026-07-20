@@ -226,10 +226,8 @@ defmodule PartyLine.Rooms.RoomTest do
     Room.speak(room, a, grant, "hello room")
     assert_receive {:a, %{type: :message, seq: 1}}, 1_000
 
-    test = self()
     pid = spawn_link(fn -> Process.sleep(:infinity) end)
     {:ok, welcome} = Room.join(room, %{name: "Late", kind: :human, pid: pid})
-    send(test, :ok)
 
     assert welcome.room.topic == "test topic"
     assert [%{body: "hello room", seq: 1}] = welcome.transcript

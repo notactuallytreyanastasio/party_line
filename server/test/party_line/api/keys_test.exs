@@ -52,7 +52,10 @@ defmodule PartyLine.API.KeysTest do
     assert [%{label: "second"}, %{label: "first"}] = Keys.list(@did)
 
     {:ok, @did} = Keys.authenticate(token2)
-    used = Enum.find(Keys.list(@did), &(&1.label == "second"))
-    assert used.last_used_at != nil
+    keys = Keys.list(@did)
+    # only the used key is touched — the counterfactual pins that authenticate/1
+    # (not mint/2) is what stamped last_used_at
+    assert Enum.find(keys, &(&1.label == "second")).last_used_at != nil
+    assert Enum.find(keys, &(&1.label == "first")).last_used_at == nil
   end
 end

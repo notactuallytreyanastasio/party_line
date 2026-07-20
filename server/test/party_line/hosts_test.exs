@@ -131,8 +131,11 @@ defmodule PartyLine.HostsTest do
     h = start(ttl: 60, sweep: 15)
     {:ok, %{id: id}} = Hosts.register(h, @did, @valid)
 
-    # Beat well past one TTL's worth of time; the entry survives.
-    for _ <- 1..5 do
+    # Beat across more than one TTL's worth of time; the entry survives because
+    # each heartbeat refreshes its monotonic clock. This one genuinely needs a
+    # real (small) sleep — liveness is monotonic-time-based with no clock to
+    # inject — so keep it minimal: 3×25ms = 75ms clears ttl 60 with margin.
+    for _ <- 1..3 do
       Process.sleep(25)
       assert :ok = Hosts.heartbeat(h, id, @did)
     end
@@ -141,16 +144,20 @@ defmodule PartyLine.HostsTest do
   end
 
   test "an entry expires and is swept once heartbeats stop" do
-    h = start(ttl: 40, sweep: 15)
+    # ttl: -1 → read-expired instantly (no sleep to age it); heartbeat/3 is
+    # map-presence only (TTL-blind), so it distinguishes 'filtered on read' from
+    # 'swept from state'.
+    h = start(ttl: -1, sweep: 60_000)
     {:ok, %{id: id}} = Hosts.register(h, @did, @valid)
-    assert Hosts.count(h) == 1
 
-    # No heartbeats: falls out of the live view immediately past TTL...
-    Process.sleep(60)
+    # past TTL for every read: out of the live view...
     assert Hosts.list(h) == []
+    # ...but still in state — heartbeat still knows it
+    assert :ok = Hosts.heartbeat(h, id, @did)
 
-    # ...and gets swept from state, so heartbeat no longer knows it.
-    Process.sleep(40)
+    # drive the sweep; the sync call is a barrier (mailbox order), so it reflects
+    # post-sweep state without a sleep
+    send(h, :sweep)
     assert {:error, :unknown} = Hosts.heartbeat(h, id, @did)
   end
 

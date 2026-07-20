@@ -416,8 +416,10 @@ defmodule PartyLine.Rooms.OperatorTest do
 
     # the director grants Cy — and only Cy — the floor
     assert_receive {:c, %{type: :grant, grant_id: g}}, 1_000
-    refute_received {:a, %{type: :grant}}
-    refute_received {:b, %{type: :grant}}
+    # a wrongly-issued grant relays through each participant's own process, so
+    # give it a window to arrive rather than checking the mailbox instantly
+    refute_receive {:a, %{type: :grant}}, 20
+    refute_receive {:b, %{type: :grant}}, 20
 
     Room.speak(room, c, g, "fine — here's my take")
 
@@ -438,10 +440,8 @@ defmodule PartyLine.Rooms.OperatorTest do
     assert body =~ ~s(that's time on "test topic". new topic:)
 
     # a fresh joiner's welcome reflects the rotated topic
-    test = self()
     pid = spawn_link(fn -> Process.sleep(:infinity) end)
     {:ok, welcome} = Room.join(room, %{name: "Late", kind: :human, pid: pid})
-    send(test, :ok)
 
     refute welcome.room.topic == "test topic"
     assert welcome.room.topic in Config.new(@base).topic_deck
