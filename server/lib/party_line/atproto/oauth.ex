@@ -17,12 +17,15 @@ defmodule PartyLine.ATProto.OAuth do
     3. `finish/2` — exchange the returned code for DPoP-bound tokens.
   """
 
+  @behaviour PartyLine.ATProto.OAuth.Behaviour
+
   alias Aether.ATProto.Crypto.{DPoP, PKCE}
   alias PartyLine.ATProto.Identity
 
   @scope "atproto transition:generic"
 
   @doc "Start the flow. Returns `{:ok, authorize_url, session}`."
+  @impl true
   def begin(handle_or_did, opts) do
     client = Keyword.fetch!(opts, :client)
 
@@ -70,6 +73,7 @@ defmodule PartyLine.ATProto.OAuth do
   Complete the flow. `params` is the callback query plus a `:client`.
   Verifies `state`/`iss`, exchanges the code, returns `{:ok, tokens}`.
   """
+  @impl true
   def finish(session, params) do
     client = params.client
 
@@ -92,6 +96,7 @@ defmodule PartyLine.ATProto.OAuth do
   end
 
   @doc "Refresh an access token (single-use refresh token → new pair)."
+  @impl true
   def refresh(tokens, opts) do
     client = Keyword.fetch!(opts, :client)
 

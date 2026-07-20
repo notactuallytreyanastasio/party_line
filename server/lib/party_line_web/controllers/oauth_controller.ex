@@ -16,7 +16,7 @@ defmodule PartyLineWeb.OAuthController do
 
   @doc "POST /oauth/login — kick off the flow for a handle."
   def login(conn, %{"handle" => handle}) do
-    case OAuth.begin(handle, client: Client.config()) do
+    case oauth_flow().begin(handle, client: Client.config()) do
       {:ok, url, session} ->
         pending_id = Sessions.put_pending(session)
 
@@ -39,7 +39,7 @@ defmodule PartyLineWeb.OAuthController do
 
     with pending_id when is_binary(pending_id) <- conn.cookies[@cookie],
          session when is_map(session) <- Sessions.take_pending(pending_id),
-         {:ok, tokens} <- OAuth.finish(session, Map.put(params, :client, Client.config())) do
+         {:ok, tokens} <- oauth_flow().finish(session, Map.put(params, :client, Client.config())) do
       session_id = Sessions.put_tokens(tokens)
 
       conn
@@ -68,4 +68,9 @@ defmodule PartyLineWeb.OAuthController do
     |> put_flash(:info, "signed out")
     |> redirect(to: ~p"/")
   end
+
+  # The OAuth flow is a seam (PartyLine.ATProto.OAuth.Behaviour): the real
+  # implementation reaches the atproto network, so tests substitute a fake to
+  # exercise the controller's branches without it.
+  defp oauth_flow, do: Application.get_env(:party_line, :oauth_flow, OAuth)
 end
